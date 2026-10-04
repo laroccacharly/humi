@@ -1,16 +1,11 @@
-import type { Cron } from "effect"
-import { Effect, Option, Ref, Schedule } from "effect"
+import { Duration, Effect, Option, Schedule } from "effect"
 
 import type { Bluetooth, BluetoothError } from "./bluetooth.ts"
-import type { Reading } from "./db/readings.ts"
+import type { HumiConfig } from "./config.ts"
+import { activeScanSeconds } from "./config.ts"
+import type { ActiveReading, PassiveReading } from "./db/readings.ts"
 import { Readings } from "./db/readings.ts"
 import { activeScan, passiveScan } from "./scan.ts"
-
-/** How long the battery check scans actively. */
-const batteryScanSeconds = 10
-
-/** Latest known battery percentage, refreshed by `checkBattery`. */
-type Battery = Ref.Ref<Option.Option<number>>
 
 /** Logs a failed scan and treats it as the meter not being seen. */
 const orNotSeen = <A>(
@@ -21,71 +16,74 @@ const orNotSeen = <A>(
     Effect.orElseSucceed(Option.none<A>)
   )
 
-/** Reads the battery with an active scan. Run rarely to spare the meter. */
-export const checkBattery: (
+/** Runs an active scan and stores the battery, if the meter answered. */
+export const recordActiveScan: (
   mac: string,
-  battery: Battery
-) => Effect.Effect<void, never, Bluetooth> = Effect.fn("checkBattery")(
-  function* checkBattery(mac: string, battery: Battery) {
-    const level = yield* orNotSeen(activeScan(mac, batteryScanSeconds))
-    if (Option.isNone(level)) {
-      return yield* Effect.logWarning(`Battery of ${mac} not seen`)
-    }
-    yield* Ref.set(battery, level)
-    return yield* Effect.logInfo(`Battery ${level.value}%`)
-  }
-)
-
-/** Reads the meter with the passive scan and stores it, if it was seen. */
-export const pollOnce: (
-  mac: string,
-  battery: Battery
-) => Effect.Effect<Option.Option<Reading>, never, Bluetooth | Readings> =
-  Effect.fn("pollOnce")(function* pollOnce(mac: string, battery: Battery) {
+  seconds: number
+) => Effect.Effect<Option.Option<ActiveReading>, never, Bluetooth | Readings> =
+  Effect.fn("recordActiveScan")(function* recordActiveScan(
+    mac: string,
+    seconds: number
+  ) {
     const readings = yield* Readings
-    const measurement = yield* orNotSeen(passiveScan(mac))
-
-    if (Option.isNone(measurement)) {
-      yield* Effect.logInfo(`${mac} not seen yet`)
+    const battery = yield* orNotSeen(activeScan(mac, seconds))
+    if (Option.isNone(battery)) {
+      yield* Effect.logWarning(`Active scan: battery of ${mac} not seen`)
       return Option.none()
     }
+    const reading = yield* readings.insertActive(mac, battery.value)
+    yield* Effect.logInfo(`Active #${reading.id} battery ${reading.battery}%`)
+    return Option.some(reading)
+  })
 
-    const level = Option.getOrNull(yield* Ref.get(battery))
-    const reading = yield* readings.insert(mac, measurement.value, level)
+/** Runs a passive scan and stores the measurement, if the meter was seen. */
+export const recordPassiveScan: (
+  mac: string
+) => Effect.Effect<Option.Option<PassiveReading>, never, Bluetooth | Readings> =
+  Effect.fn("recordPassiveScan")(function* recordPassiveScan(mac: string) {
+    const readings = yield* Readings
+    const measurement = yield* orNotSeen(passiveScan(mac))
+    if (Option.isNone(measurement)) {
+      yield* Effect.logInfo(`Passive scan: ${mac} not seen yet`)
+      return Option.none()
+    }
+    const reading = yield* readings.insertPassive(mac, measurement.value)
     yield* Effect.logInfo(
-      `#${reading.id} ${reading.temperature.toFixed(1)}°C ${reading.humidity}% battery ${reading.battery ?? "?"}% rssi ${reading.rssi ?? "?"}`
+      `Passive #${reading.id} ${reading.temperature.toFixed(1)}°C ${reading.humidity}% rssi ${reading.rssi ?? "?"}`
     )
     return Option.some(reading)
   })
 
+/** Runs `effect` now, then again `minutes` after each run finishes. */
+const everyMinutes = <A, E, R>(
+  minutes: number,
+  effect: Effect.Effect<A, E, R>
+): Effect.Effect<void, E, R> =>
+  effect.pipe(
+    Effect.repeat(Schedule.spaced(Duration.minutes(minutes))),
+    Effect.asVoid
+  )
+
 /**
- * Checks the battery, then polls the meter on every tick of `expression`
- * (passively) and re-checks the battery on every tick of `batteryExpression`
- * (actively), forever.
+ * Runs the passive scan every `passiveScanMinutes` and the active scan every
+ * `activeScanMinutes`, forever, both starting right away.
  */
 export const collect: (
-  mac: string,
-  expression: string,
-  batteryExpression: string
-) => Effect.Effect<void, Cron.CronParseError, Bluetooth | Readings> = Effect.fn(
-  "collect"
-)(function* collect(
-  mac: string,
-  expression: string,
-  batteryExpression: string
-) {
-  const battery: Battery = yield* Ref.make(Option.none<number>())
-  yield* Effect.logInfo(
-    `Polling ${mac} on "${expression}", battery on "${batteryExpression}"`
-  )
-  yield* checkBattery(mac, battery)
-  yield* Effect.all(
-    [
-      checkBattery(mac, battery).pipe(
-        Effect.schedule(Schedule.cron(batteryExpression))
-      ),
-      pollOnce(mac, battery).pipe(Effect.repeat(Schedule.cron(expression))),
-    ],
-    { concurrency: "unbounded", discard: true }
-  )
-})
+  config: HumiConfig
+) => Effect.Effect<void, never, Bluetooth | Readings> = Effect.fn("collect")(
+  function* collect(config: HumiConfig) {
+    yield* Effect.logInfo(
+      `Reading ${config.mac}: passive scan every ${config.passiveScanMinutes} min, active scan every ${config.activeScanMinutes} min for ${activeScanSeconds(config)}s`
+    )
+    return yield* Effect.all(
+      [
+        everyMinutes(config.passiveScanMinutes, recordPassiveScan(config.mac)),
+        everyMinutes(
+          config.activeScanMinutes,
+          recordActiveScan(config.mac, activeScanSeconds(config))
+        ),
+      ],
+      { concurrency: "unbounded", discard: true }
+    )
+  }
+)

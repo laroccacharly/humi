@@ -8,7 +8,10 @@ import { collect } from "./collector.ts"
 import {
   ConfigMissingError,
   configPath,
+  configSetUsage,
   configStore,
+  activeScanSeconds,
+  defaultActiveScanSeconds,
   HumiConfig,
   loadConfig,
 } from "./config.ts"
@@ -22,63 +25,52 @@ const macFlag = Flag.String("mac").pipe(
   Flag.optional
 )
 
-const everyFlag = Flag.Int("every").pipe(
-  Flag.withDescription("Poll every N minutes, on the minute"),
+const passiveScanMinutesFlag = Flag.Int("passive-scan-minutes").pipe(
+  Flag.withDescription("Minutes between passive scans (temperature, humidity)"),
+  Flag.optional
+)
+
+const activeScanMinutesFlag = Flag.Int("active-scan-minutes").pipe(
+  Flag.withDescription("Minutes between active scans (battery)"),
+  Flag.optional
+)
+
+const activeScanSecondsFlag = Flag.Int("active-scan-seconds").pipe(
+  Flag.withDescription(
+    `How long each active scan lasts (default ${defaultActiveScanSeconds}s)`
+  ),
   Flag.optional
 )
 
 const collectCommand = Command.make(
   "collect",
   {
-    mac: macFlag.pipe(Flag.withDescription("Overrides the config's mac")),
-    every: everyFlag.pipe(Flag.withDescription("Overrides the config's every")),
-    cron: Flag.String("cron").pipe(
-      Flag.withDescription(
-        "Custom poll schedule, overriding --every; six fields include seconds"
-      ),
-      Flag.optional
-    ),
-    batteryCron: Flag.String("battery-cron").pipe(
-      Flag.withDescription(
-        "When to scan actively for the battery level (also checked at start)"
-      ),
-      Flag.withDefault("0 0 12 * * *")
-    ),
     duration: Flag.Int("duration").pipe(
       Flag.withDescription("Stop after this many seconds and print a summary"),
       Flag.optional
     ),
   },
-  Effect.fn("collectCommand")(function* collectCommand({
-    mac,
-    every,
-    cron,
-    batteryCron,
-    duration,
-  }) {
+  Effect.fn("collectCommand")(function* collectCommand({ duration }) {
     const readings = yield* Readings
     const config = yield* loadConfig
     const startedAt = DateTime.formatIso(yield* DateTime.now)
-    const minutes = Option.getOrElse(every, () => config.every)
-    const expression = Option.getOrElse(cron, () => `0 */${minutes} * * * *`)
-    const run = collect(
-      Option.getOrElse(mac, () => config.mac),
-      expression,
-      batteryCron
-    ).pipe(Effect.provide(Bluetooth.layer))
+    const run = collect(config).pipe(Effect.provide(Bluetooth.layer))
 
     if (Option.isNone(duration)) {
-      yield* run
-      return
+      return yield* run
     }
 
     yield* run.pipe(Effect.timeoutOption(`${duration.value} seconds`))
-    const { total, distinct } = yield* readings.summary(startedAt)
-    yield* Console.log(
-      `Captured ${total} readings in ${duration.value}s (${distinct} distinct advertisements)`
+    const { passive, distinct, active } = yield* readings.summary(startedAt)
+    return yield* Console.log(
+      `In ${duration.value}s: ${passive} passive readings (${distinct} distinct advertisements), ${active} active readings`
     )
   })
-).pipe(Command.withDescription("Poll the meter on a cron schedule"))
+).pipe(
+  Command.withDescription(
+    "Run the passive and active scans on the config's intervals"
+  )
+)
 
 const lsCommand = Command.make(
   "ls",
@@ -87,13 +79,20 @@ const lsCommand = Command.make(
   },
   Effect.fn("lsCommand")(function* lsCommand({ limit }) {
     const readings = yield* Readings
-    for (const reading of yield* readings.latest(limit)) {
+    yield* Console.log("Passive readings")
+    for (const reading of yield* readings.latestPassive(limit)) {
       yield* Console.log(
-        `${DateTime.formatIso(reading.recorded_at)}  ${reading.temperature.toFixed(1)}°C  ${reading.humidity}%  battery ${reading.battery ?? "?"}%  rssi ${reading.rssi ?? "?"}`
+        `  ${DateTime.formatIso(reading.recorded_at)}  ${reading.temperature.toFixed(1)}°C  ${reading.humidity}%  rssi ${reading.rssi ?? "?"}`
+      )
+    }
+    yield* Console.log("Active readings")
+    for (const reading of yield* readings.latestActive(limit)) {
+      yield* Console.log(
+        `  ${DateTime.formatIso(reading.recorded_at)}  battery ${reading.battery}%`
       )
     }
   })
-).pipe(Command.withDescription("Show the latest readings"))
+).pipe(Command.withDescription("Show the latest passive and active readings"))
 
 const setupBluetoothCommand = Command.make(
   "setup-bluetooth",
@@ -133,7 +132,7 @@ const bluetoothLsCommand = Command.make(
       yield* Console.log(`${device.mac}  ${rssi}  ${reading}  ${device.name}`)
     }
     return yield* Console.log(
-      "\nUse one with: humi config set --mac <address> --every <minutes>"
+      `\nUse one with: humi config set ${configSetUsage}`
     )
   })
 ).pipe(Command.withDescription("Scan for nearby SwitchBot devices"))
@@ -144,35 +143,61 @@ const bluetoothCommand = Command.make("bluetooth").pipe(
 )
 
 const showConfig = (config: HumiConfig) =>
-  Console.log(`${configPath}\nmac    ${config.mac}\nevery  ${config.every} min`)
+  Console.log(
+    [
+      configPath,
+      `mac           ${config.mac}`,
+      `passive scan  every ${config.passiveScanMinutes} min`,
+      `active scan   every ${config.activeScanMinutes} min`,
+      `              for ${activeScanSeconds(config)}s${config.activeScanSeconds === undefined ? " (default)" : ""}`,
+    ].join("\n")
+  )
 
 const configSetCommand = Command.make(
   "set",
-  { mac: macFlag, every: everyFlag },
-  Effect.fn("configSetCommand")(function* configSetCommand({ mac, every }) {
-    // The first `set` creates the config, so it needs every field.
+  {
+    mac: macFlag,
+    passiveScanMinutes: passiveScanMinutesFlag,
+    activeScanMinutes: activeScanMinutesFlag,
+    activeScanSeconds: activeScanSecondsFlag,
+  },
+  Effect.fn("configSetCommand")(function* configSetCommand(flags) {
+    // The first `set` creates the config, so it needs every required field.
     const current = yield* configStore.load
+    const saved = <A>(get: (config: HumiConfig) => A) =>
+      current.pipe(Option.map(get))
     const values = Option.all({
-      mac: Option.orElse(mac, () => current.pipe(Option.map((c) => c.mac))),
-      every: Option.orElse(every, () =>
-        current.pipe(Option.map((c) => c.every))
+      mac: Option.orElse(flags.mac, () => saved((c) => c.mac)),
+      passiveScanMinutes: Option.orElse(flags.passiveScanMinutes, () =>
+        saved((c) => c.passiveScanMinutes)
+      ),
+      activeScanMinutes: Option.orElse(flags.activeScanMinutes, () =>
+        saved((c) => c.activeScanMinutes)
       ),
     })
     if (Option.isNone(values)) {
       return yield* new ConfigMissingError({
-        message: `No config at ${configPath} yet; pass both --mac and --every`,
+        message: `No config at ${configPath} yet; pass ${configSetUsage}`,
       })
     }
+    // Optional, and left out of the file until set, so the default applies.
+    const seconds = Option.orElse(flags.activeScanSeconds, () =>
+      current.pipe(Option.flatMapNullishOr((c) => c.activeScanSeconds))
+    )
     const config = yield* Schema.decodeUnknownEffect(HumiConfig)({
       ...values.value,
       mac: values.value.mac.toUpperCase(),
+      ...Option.match(seconds, {
+        onNone: () => ({}),
+        onSome: (value) => ({ activeScanSeconds: value }),
+      }),
     })
     yield* configStore.save(config)
     return yield* showConfig(config)
   })
 ).pipe(
   Command.withDescription(
-    "Create the config (needs --mac and --every), or change part of it"
+    "Create the config (needs --mac and both intervals), or change part of it"
   )
 )
 

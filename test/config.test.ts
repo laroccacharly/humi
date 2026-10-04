@@ -2,23 +2,35 @@ import { expect, test } from "bun:test"
 
 import { Schema } from "effect"
 
-import { HumiConfig } from "../src/config.ts"
+import { activeScanSeconds, HumiConfig } from "../src/config.ts"
 
 const decode = Schema.decodeUnknownExit(HumiConfig)
 const mac = "EC:0F:01:46:10:4A"
+const intervals = { passiveScanMinutes: 1, activeScanMinutes: 1440 }
 
 test("accepts an address and a frequency", () => {
-  expect(decode({ mac, every: 5 })._tag).toBe("Success")
+  expect(decode({ mac, ...intervals })._tag).toBe("Success")
 })
 
-test("rejects a malformed address and frequencies cron cannot express", () => {
+test("rejects a malformed address and intervals under a minute", () => {
   for (const input of [
-    { mac: "EC:0F:01:46:10", every: 1 },
-    { mac: "ec:0f:01:46:10:4a", every: 1 },
-    { mac, every: 0 },
-    { mac, every: 60 },
-    { mac, every: 1.5 },
+    { mac: "EC:0F:01:46:10", ...intervals },
+    { mac: "ec:0f:01:46:10:4a", ...intervals },
+    { mac, ...intervals, passiveScanMinutes: 0 },
+    { mac, ...intervals, activeScanMinutes: 1.5 },
+    { mac, passiveScanMinutes: 1 },
   ]) {
     expect(decode(input)._tag).toBe("Failure")
   }
+})
+
+test("active scans last 30 seconds unless the config says otherwise", () => {
+  const decodeSync = Schema.decodeUnknownSync(HumiConfig)
+  expect(activeScanSeconds(decodeSync({ mac, ...intervals }))).toBe(30)
+  expect(
+    activeScanSeconds(decodeSync({ mac, ...intervals, activeScanSeconds: 12 }))
+  ).toBe(12)
+  expect(decode({ mac, ...intervals, activeScanSeconds: 0 })._tag).toBe(
+    "Failure"
+  )
 })

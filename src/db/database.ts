@@ -13,41 +13,38 @@ export const dataDirectory = path.join(dataHome, "humi")
 /** Path to humi's SQLite database file. */
 export const databasePath = path.join(dataDirectory, "humi.sqlite")
 
+/**
+ * Every table's `recorded_at`: set by SQLite on insert, as an ISO 8601 UTC
+ * timestamp with milliseconds (`2026-10-04T09:40:00.123Z`), so all tables
+ * share one clock and one format.
+ */
+const recordedAt =
+  "recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+
+// One table per kind of scan: they carry different data at different times.
 const migrations = SqliteMigrator.layer({
   loader: SqliteMigrator.fromRecord({
-    "0001_create_readings": Effect.gen(function* createReadingsTable() {
+    "0001_create_readings": Effect.gen(function* createReadingTables() {
       const sql = yield* SqlClient.SqlClient
       yield* sql`
-        CREATE TABLE readings (
+        CREATE TABLE passive_readings (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           mac TEXT NOT NULL,
           temperature REAL NOT NULL,
           humidity INTEGER NOT NULL,
+          rssi INTEGER,
+          raw TEXT NOT NULL,
+          ${sql.literal(recordedAt)}
+        )
+      `
+      yield* sql`
+        CREATE TABLE active_readings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          mac TEXT NOT NULL,
           battery INTEGER NOT NULL,
-          rssi INTEGER,
-          raw TEXT NOT NULL,
-          recorded_at TEXT NOT NULL
+          ${sql.literal(recordedAt)}
         )
       `
-    }),
-    // The battery now comes from a daily active scan, so it can be unknown.
-    "0002_nullable_battery": Effect.gen(function* nullableBattery() {
-      const sql = yield* SqlClient.SqlClient
-      yield* sql`ALTER TABLE readings RENAME TO readings_old`
-      yield* sql`
-        CREATE TABLE readings (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          mac TEXT NOT NULL,
-          temperature REAL NOT NULL,
-          humidity INTEGER NOT NULL,
-          battery INTEGER,
-          rssi INTEGER,
-          raw TEXT NOT NULL,
-          recorded_at TEXT NOT NULL
-        )
-      `
-      yield* sql`INSERT INTO readings SELECT * FROM readings_old`
-      yield* sql`DROP TABLE readings_old`
     }),
   }),
 })
