@@ -10,7 +10,7 @@
   "scripts": {
     "humi": "bun ./src/index.ts",
     "test": "bun test",
-    "postinstall": "test -x \"$HOME/.cache/lightpanda-node/lightpanda\" || lightpanda install",
+    "postinstall": "[ \"$(\"$HOME/.cache/lightpanda-node/lightpanda\" version 2>/dev/null)\" = 1.0.0 ] || lightpanda install 1.0.0",
     "lint": "bun --bun oxlint .",
     "lint:fix": "bun --bun oxlint . --fix",
     "format": "oxfmt .",
