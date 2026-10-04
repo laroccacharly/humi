@@ -55,6 +55,12 @@ export class Readings extends Context.Service<
     readonly latestActive: (
       limit: number
     ) => Effect.Effect<readonly ActiveReading[]>
+    readonly passiveSince: (
+      since: string
+    ) => Effect.Effect<readonly PassiveReading[]>
+    readonly activeSince: (
+      since: string
+    ) => Effect.Effect<readonly ActiveReading[]>
     readonly summary: (since: string) => Effect.Effect<typeof Summary.Type>
   }
 >()("humi/db/Readings") {
@@ -85,6 +91,18 @@ export class Readings extends Context.Service<
         Result: ActiveReading,
         execute: (limit) =>
           sql`SELECT * FROM active_readings ORDER BY id DESC LIMIT ${limit}`,
+      })
+      const findPassiveSince = SqlSchema.findAll({
+        Request: Schema.String,
+        Result: PassiveReading,
+        execute: (since) =>
+          sql`SELECT * FROM passive_readings WHERE recorded_at >= ${since} ORDER BY recorded_at`,
+      })
+      const findActiveSince = SqlSchema.findAll({
+        Request: Schema.String,
+        Result: ActiveReading,
+        execute: (since) =>
+          sql`SELECT * FROM active_readings WHERE recorded_at >= ${since} ORDER BY recorded_at`,
       })
       const findSummary = SqlSchema.findOne({
         Request: Schema.String,
@@ -145,6 +163,22 @@ export class Readings extends Context.Service<
         return yield* findLatestActive(limit)
       }, Effect.orDie)
 
+      const passiveSince: (
+        since: string
+      ) => Effect.Effect<readonly PassiveReading[]> = Effect.fn(
+        "Readings.passiveSince"
+      )(function* passiveSince(since: string) {
+        return yield* findPassiveSince(since)
+      }, Effect.orDie)
+
+      const activeSince: (
+        since: string
+      ) => Effect.Effect<readonly ActiveReading[]> = Effect.fn(
+        "Readings.activeSince"
+      )(function* activeSince(since: string) {
+        return yield* findActiveSince(since)
+      }, Effect.orDie)
+
       const summary: (since: string) => Effect.Effect<typeof Summary.Type> =
         Effect.fn("Readings.summary")(function* summary(since: string) {
           return yield* findSummary(since)
@@ -155,6 +189,8 @@ export class Readings extends Context.Service<
         insertActive,
         latestPassive,
         latestActive,
+        passiveSince,
+        activeSince,
         summary,
       })
     })

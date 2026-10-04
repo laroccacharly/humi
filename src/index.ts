@@ -19,6 +19,7 @@ import {
 import { layer as databaseLayer } from "./db/database.ts"
 import { Readings } from "./db/readings.ts"
 import { findSwitchbots } from "./discover.ts"
+import { serve } from "./server.ts"
 import { setupBluetooth } from "./setup-bluetooth.ts"
 
 const macFlag = Flag.String("mac").pipe(
@@ -43,19 +44,27 @@ const activeScanSecondsFlag = Flag.Int("active-scan-seconds").pipe(
   Flag.optional
 )
 
-const collectCommand = Command.make(
-  "collect",
+const runCommand = Command.make(
+  "run",
   {
     duration: Flag.Int("duration").pipe(
       Flag.withDescription("Stop after this many seconds and print a summary"),
       Flag.optional
     ),
+    port: Flag.Int("port").pipe(
+      Flag.withDescription("Port for the UI (default: any free port)"),
+      Flag.withDefault(0)
+    ),
   },
-  Effect.fn("collectCommand")(function* collectCommand({ duration }) {
+  Effect.fn("runCommand")(function* runCommand({ duration, port }) {
     const readings = yield* Readings
     const config = yield* loadConfig
     const startedAt = DateTime.formatIso(yield* DateTime.now)
-    const run = collect(config).pipe(Effect.provide(Bluetooth.layer))
+    const run = serve(port).pipe(
+      Effect.andThen(collect(config)),
+      Effect.provide(Bluetooth.layer),
+      Effect.scoped
+    )
 
     if (Option.isNone(duration)) {
       return yield* run
@@ -69,7 +78,7 @@ const collectCommand = Command.make(
   })
 ).pipe(
   Command.withDescription(
-    "Run the passive and active scans on the config's intervals"
+    "Run the scans on the config's intervals and serve the UI"
   )
 )
 
@@ -212,13 +221,14 @@ const configCommand = Command.make("config", {}, () =>
 const humiService = serviceCommand({
   name: "humi",
   description: "humi humidity and temperature logger",
-  command: [process.execPath, import.meta.filename, "collect"],
+  // A fixed port so the UI keeps the same URL across restarts.
+  command: [process.execPath, import.meta.filename, "run", "--port", "7878"],
 })
 
 const humi = Command.make("humi").pipe(
   Command.withDescription("Humidity and temperature logger"),
   Command.withSubcommands([
-    collectCommand,
+    runCommand,
     lsCommand,
     configCommand,
     bluetoothCommand,
