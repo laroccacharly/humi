@@ -1,10 +1,10 @@
 import type { Cron } from "effect"
 import { Effect, Option, Ref, Schedule } from "effect"
 
-import { Bluetooth } from "./bluetooth.ts"
+import type { Bluetooth, BluetoothError } from "./bluetooth.ts"
 import type { Reading } from "./db/readings.ts"
 import { Readings } from "./db/readings.ts"
-import { decodeBattery, decodeOutdoorMeter, parseInfo } from "./switchbot.ts"
+import { activeScan, passiveScan } from "./scan.ts"
 
 /** How long the battery check scans actively. */
 const batteryScanSeconds = 10
@@ -12,35 +12,22 @@ const batteryScanSeconds = 10
 /** Latest known battery percentage, refreshed by `checkBattery`. */
 type Battery = Ref.Ref<Option.Option<number>>
 
-const readInfo: (mac: string) => Effect.Effect<string, never, Bluetooth> =
-  Effect.fn("readInfo")(function* readInfo(mac: string) {
-    const bluetooth = yield* Bluetooth
-    return yield* bluetooth.info(mac).pipe(
-      Effect.tapError((error) =>
-        Effect.logWarning("bluetoothctl failed", error)
-      ),
-      Effect.orElseSucceed(() => "")
-    )
-  })
+/** Logs a failed scan and treats it as the meter not being seen. */
+const orNotSeen = <A>(
+  scan: Effect.Effect<Option.Option<A>, BluetoothError, Bluetooth>
+): Effect.Effect<Option.Option<A>, never, Bluetooth> =>
+  scan.pipe(
+    Effect.tapError((failure) => Effect.logWarning("Scan failed", failure)),
+    Effect.orElseSucceed(Option.none<A>)
+  )
 
-/**
- * Scans actively for a few seconds to read the battery, which the meter only
- * sends in reply to a scan request. Run rarely to spare the meter's battery.
- */
+/** Reads the battery with an active scan. Run rarely to spare the meter. */
 export const checkBattery: (
   mac: string,
   battery: Battery
 ) => Effect.Effect<void, never, Bluetooth> = Effect.fn("checkBattery")(
   function* checkBattery(mac: string, battery: Battery) {
-    const bluetooth = yield* Bluetooth
-    yield* bluetooth
-      .activeScan(batteryScanSeconds)
-      .pipe(
-        Effect.catchTag("BluetoothError", (error) =>
-          Effect.logWarning("Battery scan failed", error)
-        )
-      )
-    const level = decodeBattery(parseInfo(yield* readInfo(mac)))
+    const level = yield* orNotSeen(activeScan(mac, batteryScanSeconds))
     if (Option.isNone(level)) {
       return yield* Effect.logWarning(`Battery of ${mac} not seen`)
     }
@@ -49,14 +36,14 @@ export const checkBattery: (
   }
 )
 
-/** Reads the meter once and stores the reading, if the meter was seen. */
+/** Reads the meter with the passive scan and stores it, if it was seen. */
 export const pollOnce: (
   mac: string,
   battery: Battery
 ) => Effect.Effect<Option.Option<Reading>, never, Bluetooth | Readings> =
   Effect.fn("pollOnce")(function* pollOnce(mac: string, battery: Battery) {
     const readings = yield* Readings
-    const measurement = decodeOutdoorMeter(parseInfo(yield* readInfo(mac)))
+    const measurement = yield* orNotSeen(passiveScan(mac))
 
     if (Option.isNone(measurement)) {
       yield* Effect.logInfo(`${mac} not seen yet`)
