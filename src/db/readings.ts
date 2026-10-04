@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect"
-import { Model } from "effect/unstable/schema"
-import { SqlClient, SqlModel, SqlSchema } from "effect/unstable/sql"
+import { Model } from "effect/schema"
+import { SqlClient, SqlModel, SqlSchema } from "effect/sql"
 
 import type { Measurement } from "../switchbot.ts"
 

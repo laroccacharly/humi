@@ -68,6 +68,45 @@ export const parseInfo = (text: string): Advertisement => {
 const toHex = (bytes: readonly number[]): string =>
   bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("")
 
+/** A device listed by `bluetoothctl devices`. */
+export interface Device {
+  readonly mac: string
+  readonly name: string
+}
+
+// bluetoothctl colours devices it has not heard from lately.
+// oxlint-disable-next-line no-control-regex
+const ansi = /\u001B\[[0-9;]*m/gu
+const deviceLine =
+  /^Device (?<mac>(?:[0-9A-F]{2}:){5}[0-9A-F]{2}) (?<name>.*)$/u
+
+/** Parses `bluetoothctl devices`. */
+export const parseDevices = (text: string): Device[] =>
+  text
+    .replaceAll(ansi, "")
+    .split("\n")
+    .flatMap((line) => {
+      const groups = deviceLine.exec(line.trim())?.groups
+      return groups?.mac === undefined
+        ? []
+        : [{ mac: groups.mac, name: groups.name ?? "" }]
+    })
+
+/** Whether the advertisement carries SwitchBot manufacturer data. */
+export const isSwitchbot = (advertisement: Advertisement): boolean =>
+  advertisement.manufacturer.length > 0
+
+/**
+ * The outdoor meter starts its manufacturer data with its own address, which
+ * tells it apart from other SwitchBot devices (their layout differs).
+ */
+export const isOutdoorMeter = (
+  mac: string,
+  advertisement: Advertisement
+): boolean =>
+  toHex(advertisement.manufacturer.slice(0, 6)) ===
+  mac.replaceAll(":", "").toLowerCase()
+
 /**
  * Decodes a W3400010 advertisement.
  *

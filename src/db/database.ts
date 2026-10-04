@@ -2,7 +2,7 @@ import path from "node:path"
 
 import { SqliteClient, SqliteMigrator } from "@effect/sql-sqlite-bun"
 import { Effect, FileSystem, Layer } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
 
 const dataHome =
   process.env.XDG_DATA_HOME ?? path.join(process.env.HOME ?? "", ".local/share")

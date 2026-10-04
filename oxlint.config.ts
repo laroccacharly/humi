@@ -2,10 +2,8 @@ import { defineConfig } from "oxlint"
 import antiSlop from "ultracite/oxlint/anti-slop"
 import core from "ultracite/oxlint/core"
 
-import effect from "./oxlint.effect.ts"
-
 export default defineConfig({
-  extends: [core, antiSlop, effect],
+  extends: [core, antiSlop],
   jsPlugins: ["ts-lint"],
   options: {
     typeAware: true,

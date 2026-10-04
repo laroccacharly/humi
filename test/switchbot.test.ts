@@ -5,6 +5,9 @@ import { Option } from "effect"
 import {
   decodeBattery,
   decodeOutdoorMeter,
+  isOutdoorMeter,
+  isSwitchbot,
+  parseDevices,
   parseInfo,
 } from "../src/switchbot.ts"
 
@@ -54,5 +57,25 @@ describe("SwitchBot outdoor meter", () => {
   test("is none when the meter has not been seen", () => {
     const missing = "Device EC:0F:01:46:10:4A not available\n"
     expect(Option.isNone(decodeOutdoorMeter(parseInfo(missing)))).toBe(true)
+  })
+})
+
+describe("Device discovery", () => {
+  test("parses bluetoothctl devices, including greyed-out ones", () => {
+    const devices = parseDevices(
+      "Device EC:0F:01:46:10:4A EC-0F-01-46-10-4A\n\u001B[1;30mDevice 7C:C0:6F:7F:CC:BC AirPods\u001B[0m\nnoise\n"
+    )
+    expect(devices).toEqual([
+      { mac: "EC:0F:01:46:10:4A", name: "EC-0F-01-46-10-4A" },
+      { mac: "7C:C0:6F:7F:CC:BC", name: "AirPods" },
+    ])
+  })
+
+  test("recognises the outdoor meter by its own address", () => {
+    const advertisement = parseInfo(info)
+    expect(isSwitchbot(advertisement)).toBe(true)
+    expect(isOutdoorMeter("EC:0F:01:46:10:4A", advertisement)).toBe(true)
+    expect(isOutdoorMeter("AA:BB:CC:DD:EE:FF", advertisement)).toBe(false)
+    expect(isSwitchbot(parseInfo("Device AA:BB:CC:DD:EE:FF\n"))).toBe(false)
   })
 })

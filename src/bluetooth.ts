@@ -7,7 +7,7 @@ import {
   Schema,
   Stream,
 } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { switchbotCompanyId } from "./switchbot.ts"
 
@@ -54,6 +54,13 @@ export class Bluetooth extends Context.Service<
   Bluetooth,
   {
     readonly info: (mac: string) => Effect.Effect<string, BluetoothError>
+    /** `bluetoothctl devices`: every device BlueZ currently knows about. */
+    readonly devices: Effect.Effect<string, BluetoothError>
+    /**
+     * Drops what BlueZ cached about an unpaired device, so the next `info`
+     * only shows advertisements received from now on.
+     */
+    readonly forget: (mac: string) => Effect.Effect<void, BluetoothError>
     /** Actively scans for a while; the only way to get scan response data. */
     readonly activeScan: (
       seconds: number
@@ -100,6 +107,21 @@ export class Bluetooth extends Context.Service<
             .pipe(Effect.mapError((cause) => new BluetoothError({ cause })))
         })
 
+      const devices = spawner
+        .string(ChildProcess.make("bluetoothctl", ["devices"]))
+        .pipe(
+          Effect.mapError((cause) => new BluetoothError({ cause })),
+          Effect.withSpan("Bluetooth.devices")
+        )
+
+      // `remove` exits non-zero when BlueZ has nothing cached, which is fine.
+      const forget: (mac: string) => Effect.Effect<void, BluetoothError> =
+        Effect.fn("Bluetooth.forget")(function* forget(mac: string) {
+          yield* spawner
+            .exitCode(ChildProcess.make("bluetoothctl", ["remove", mac], quiet))
+            .pipe(Effect.mapError((cause) => new BluetoothError({ cause })))
+        })
+
       const activeScan: (
         seconds: number
       ) => Effect.Effect<void, BluetoothError> = Effect.fn(
@@ -120,7 +142,7 @@ export class Bluetooth extends Context.Service<
           )
       })
 
-      return Bluetooth.of({ info, activeScan })
+      return Bluetooth.of({ info, devices, forget, activeScan })
     })
   )
 }

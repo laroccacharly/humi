@@ -14,7 +14,6 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "oxlint.config.ts",
-    "oxlint.effect.ts",
     "oxfmt.config.ts"
   ]
 }

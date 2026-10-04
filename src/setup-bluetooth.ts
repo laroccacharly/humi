@@ -1,5 +1,5 @@
 import { Effect, Schedule, Schema } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 /** Raised when passive Bluetooth monitoring could not be enabled. */
 export class SetupError extends Schema.TaggedError<SetupError>()("SetupError", {
