@@ -10,6 +10,7 @@
   "scripts": {
     "humi": "bun ./src/index.ts",
     "test": "bun test",
+    "postinstall": "test -x \"$HOME/.cache/lightpanda-node/lightpanda\" || lightpanda install",
     "lint": "bun --bun oxlint .",
     "lint:fix": "bun --bun oxlint . --fix",
     "format": "oxfmt .",
@@ -25,12 +26,14 @@
     "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@lightpanda/browser": "^1.6.0",
     "@types/bun": "^1.4.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "oxfmt": "^0.65.0",
     "oxlint": "1.83.0",
     "oxlint-tsgolint": "7",
+    "playwright-core": "^1.63.0",
     "ts-lint": "github:laroccacharly/ts-lint#v0.1.0",
     "typescript": "^7.0.2",
     "ultracite": "^7.11.1"
