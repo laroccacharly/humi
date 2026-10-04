@@ -1,0 +1,105 @@
+import { Array as Arr, Option, Schema } from "effect"
+
+/** SwitchBot's Bluetooth company identifier, as printed by `bluetoothctl`. */
+export const switchbotCompanyId = "0x0969"
+
+/** Service data UUID SwitchBot devices advertise under. */
+const serviceUuid = "0000fd3d-0000-1000-8000-00805f9b34fb"
+
+/** The parts of a `bluetoothctl info` dump the meter decoder needs. */
+export interface Advertisement {
+  /** SwitchBot manufacturer data, without the company id. */
+  readonly manufacturer: readonly number[]
+  /** SwitchBot service data, without the UUID. */
+  readonly service: readonly number[]
+  readonly rssi: Option.Option<number>
+}
+
+/**
+ * Temperature and humidity from a SwitchBot Indoor/Outdoor Thermo-Hygrometer.
+ * They are in the regular broadcast, so passive listening is enough.
+ */
+export class Measurement extends Schema.Class<Measurement>("Measurement")({
+  temperature: Schema.Number,
+  humidity: Schema.Int,
+  rssi: Schema.NullOr(Schema.Int),
+  /** Manufacturer data as hex, to tell fresh advertisements from repeats. */
+  raw: Schema.String,
+}) {}
+
+const hexLine = /^\s+(?<hex>(?:[0-9a-f]{2} )+)/iu
+
+/** Hex bytes printed on the indented lines that follow `header`. */
+const bytesAfter = (lines: readonly string[], header: string): number[] => {
+  const start = lines.findIndex((line) => line.includes(header))
+  if (start === -1) {
+    return []
+  }
+  const bytes: number[] = []
+  for (const line of lines.slice(start + 1)) {
+    const match = hexLine.exec(line)
+    if (match === null) {
+      break
+    }
+    for (const pair of (match.groups?.hex ?? "").trim().split(" ")) {
+      bytes.push(Number.parseInt(pair, 16))
+    }
+  }
+  return bytes
+}
+
+/** Extracts SwitchBot advertisement data from `bluetoothctl info <mac>`. */
+export const parseInfo = (text: string): Advertisement => {
+  const lines = text.split("\n")
+  const keyIndex = lines.findIndex((line) =>
+    line.includes(`ManufacturerData.Key: ${switchbotCompanyId}`)
+  )
+  const rssi = /RSSI: \S+ \((?<dbm>-?\d+)\)/u.exec(text)?.groups?.dbm
+  return {
+    manufacturer:
+      keyIndex === -1
+        ? []
+        : bytesAfter(lines.slice(keyIndex), "ManufacturerData.Value:"),
+    service: bytesAfter(lines, `ServiceData.${serviceUuid}:`),
+    rssi: Option.map(Option.fromNullishOr(rssi), Number),
+  }
+}
+
+const toHex = (bytes: readonly number[]): string =>
+  bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("")
+
+/**
+ * Decodes a W3400010 advertisement.
+ *
+ * Unlike other SwitchBot meters, this model puts temperature and humidity in
+ * the manufacturer data (after its MAC address) and only the battery in the
+ * service data, which arrives in the scan response. Layout from
+ * OpenWonderLabs/SwitchBotAPI-BLE#26: the top bit of each byte is a flag
+ * (temperature sign, °F display, ...) and the low bits carry the value.
+ */
+export const decodeOutdoorMeter = (
+  advertisement: Advertisement
+): Option.Option<Measurement> =>
+  Option.all({
+    fraction: Arr.get(advertisement.manufacturer, 8),
+    integer: Arr.get(advertisement.manufacturer, 9),
+    humidity: Arr.get(advertisement.manufacturer, 10),
+  }).pipe(
+    Option.map(
+      ({ fraction, integer, humidity }) =>
+        new Measurement({
+          temperature:
+            (integer >= 0x80 ? 1 : -1) *
+            ((integer % 0x80) + (fraction % 0x10) / 10),
+          humidity: humidity % 0x80,
+          rssi: Option.getOrNull(advertisement.rssi),
+          raw: toHex(advertisement.manufacturer),
+        })
+    )
+  )
+
+/** Battery percentage from the scan response's service data. */
+export const decodeBattery = (
+  advertisement: Advertisement
+): Option.Option<number> =>
+  Option.map(Arr.get(advertisement.service, 2), (battery) => battery % 0x80)
