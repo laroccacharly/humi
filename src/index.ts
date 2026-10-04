@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { Console, DateTime, Effect, Layer, Option, Schema } from "effect"
+import { serviceCommand } from "effect-lib/systemd"
 import { Command, Flag } from "effect/cli"
 
 import { Bluetooth } from "./bluetooth.ts"
@@ -208,6 +209,12 @@ const configCommand = Command.make("config", {}, () =>
   Command.withSubcommands([configSetCommand])
 )
 
+const humiService = serviceCommand({
+  name: "humi",
+  description: "humi humidity and temperature logger",
+  command: [process.execPath, import.meta.filename, "collect"],
+})
+
 const humi = Command.make("humi").pipe(
   Command.withDescription("Humidity and temperature logger"),
   Command.withSubcommands([
@@ -216,6 +223,7 @@ const humi = Command.make("humi").pipe(
     configCommand,
     bluetoothCommand,
     setupBluetoothCommand,
+    humiService,
   ])
 )
 
