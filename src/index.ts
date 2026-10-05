@@ -222,7 +222,8 @@ const humiService = serviceCommand({
   name: "humi",
   description: "humi humidity and temperature logger",
   // A fixed port so the UI keeps the same URL across restarts.
-  command: [process.execPath, import.meta.filename, "run", "--port", "7878"],
+  script: import.meta.filename,
+  args: ["run", "--port", "7878"],
 })
 
 const humi = Command.make("humi").pipe(
