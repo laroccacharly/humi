@@ -77,6 +77,7 @@ export class Readings extends Context.Service<
     readonly passiveSince: (
       since: string
     ) => Effect.Effect<readonly PassiveReading[]>
+    readonly plugSince: (since: string) => Effect.Effect<readonly PlugReading[]>
     readonly activeSince: (
       since: string
     ) => Effect.Effect<readonly ActiveReading[]>
@@ -127,6 +128,12 @@ export class Readings extends Context.Service<
         Result: PassiveReading,
         execute: (since) =>
           sql`SELECT * FROM passive_readings WHERE recorded_at >= ${since} ORDER BY recorded_at`,
+      })
+      const findPlugSince = SqlSchema.findAll({
+        Request: Schema.String,
+        Result: PlugReading,
+        execute: (since) =>
+          sql`SELECT * FROM plug_readings WHERE recorded_at >= ${since} ORDER BY recorded_at`,
       })
       const findActiveSince = SqlSchema.findAll({
         Request: Schema.String,
@@ -228,6 +235,14 @@ export class Readings extends Context.Service<
         return yield* findPassiveSince(since)
       }, Effect.orDie)
 
+      const plugSince: (
+        since: string
+      ) => Effect.Effect<readonly PlugReading[]> = Effect.fn(
+        "Readings.plugSince"
+      )(function* plugSince(since: string) {
+        return yield* findPlugSince(since)
+      }, Effect.orDie)
+
       const activeSince: (
         since: string
       ) => Effect.Effect<readonly ActiveReading[]> = Effect.fn(
@@ -249,6 +264,7 @@ export class Readings extends Context.Service<
         latestPlug,
         latestActive,
         passiveSince,
+        plugSince,
         activeSince,
         summary,
       })

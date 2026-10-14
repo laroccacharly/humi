@@ -38,5 +38,10 @@ test("the UI shows the latest readings", async () => {
       browserProcess.kill()
     }
   })
-  expect(metrics).toEqual(["Temperature18°C", "Humidity45%", "Battery97%"])
+  expect(metrics).toEqual([
+    "Temperature18°C",
+    "Humidity45%",
+    "Power40 W",
+    "Battery97%",
+  ])
 }, 10_000)

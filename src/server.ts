@@ -19,12 +19,17 @@ const recentReadings: Effect.Effect<
     DateTime.subtractDuration(yield* DateTime.now, Duration.days(uiDays))
   )
   const passive = yield* readings.passiveSince(since)
+  const plug = yield* readings.plugSince(since)
   const active = yield* readings.activeSince(since)
   return {
     passive: passive.map((row) => ({
       t: DateTime.toEpochMillis(row.recorded_at),
       temperature: row.temperature,
       humidity: row.humidity,
+    })),
+    plug: plug.map((row) => ({
+      t: DateTime.toEpochMillis(row.recorded_at),
+      watts: row.watts,
     })),
     active: active.map((row) => ({
       t: DateTime.toEpochMillis(row.recorded_at),

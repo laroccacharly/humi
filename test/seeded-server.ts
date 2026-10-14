@@ -26,6 +26,10 @@ const seed = Effect.gen(function* seed() {
     VALUES (${mac}, 99, 99, -60, 'old', ${old})
   `
   yield* sql`
+    INSERT INTO plug_readings (mac, is_on, watts, rssi, raw, recorded_at)
+    VALUES ('D8:3B:DA:11:C1:4A', 1, 40, -60, 'plug', ${new Date(now - hour).toISOString()})
+  `
+  yield* sql`
     INSERT INTO active_readings (mac, battery, recorded_at)
     VALUES (${mac}, 97, ${new Date(now - 2 * hour).toISOString()})
   `

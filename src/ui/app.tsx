@@ -14,16 +14,17 @@ import {
 import type { ReadingsResponse } from "./api.ts"
 import { decodeReadings } from "./api.ts"
 
-const metricKeys = ["temperature", "humidity", "battery"] as const
+const metricKeys = ["temperature", "humidity", "watts", "battery"] as const
 
 type Metric = (typeof metricKeys)[number]
 
 const metrics: Record<
   Metric,
-  { label: string; unit: string; axis: "celsius" | "percent" }
+  { label: string; unit: string; axis: "celsius" | "percent" | "watts" }
 > = {
   temperature: { label: "Temperature", unit: "°C", axis: "celsius" },
   humidity: { label: "Humidity", unit: "%", axis: "percent" },
+  watts: { label: "Power", unit: " W", axis: "watts" },
   battery: { label: "Battery", unit: "%", axis: "percent" },
 }
 
@@ -58,6 +59,7 @@ const formatDateTime = (t: number) =>
 const useReadings = () => {
   const [data, setData] = useState<typeof ReadingsResponse.Type>({
     passive: [],
+    plug: [],
     active: [],
   })
   useEffect(() => {
@@ -87,7 +89,9 @@ const App = () => {
 
   const rows = useMemo(
     (): Row[] =>
-      [...data.passive, ...data.active].toSorted((a, b) => a.t - b.t),
+      [...data.passive, ...data.plug, ...data.active].toSorted(
+        (a, b) => a.t - b.t
+      ),
     [data]
   )
   const spanMs = (rows.at(-1)?.t ?? 0) - (rows.at(0)?.t ?? 0)
@@ -95,6 +99,9 @@ const App = () => {
   const latest: Record<Metric, Option.Option<number>> = {
     temperature: lastPassive.pipe(Option.map((row) => row.temperature)),
     humidity: lastPassive.pipe(Option.map((row) => row.humidity)),
+    watts: Option.fromNullishOr(data.plug.at(-1)).pipe(
+      Option.map((row) => row.watts)
+    ),
     battery: Option.fromNullishOr(data.active.at(-1)).pipe(
       Option.map((row) => row.battery)
     ),
@@ -166,6 +173,15 @@ const App = () => {
               tickLine={false}
               axisLine={false}
             />
+            <YAxis
+              yAxisId="watts"
+              orientation="right"
+              domain={[0, "auto"]}
+              unit=" W"
+              tickLine={false}
+              axisLine={false}
+              hide={!shown.has("watts")}
+            />
             <Tooltip
               labelFormatter={(t) => formatDateTime(Number(t))}
               contentStyle={{
@@ -182,7 +198,8 @@ const App = () => {
                   dataKey={metric}
                   name={metrics[metric].label}
                   unit={metrics[metric].unit}
-                  type="monotone"
+                  // The plug switches, so power steps instead of curving.
+                  type={metric === "watts" ? "stepAfter" : "monotone"}
                   stroke={`var(--${metric})`}
                   strokeWidth={2}
                   dot={false}

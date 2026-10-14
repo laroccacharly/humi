@@ -7,6 +7,7 @@
   --temperature: #e76e50;
   --humidity: #2a9d90;
   --battery: #e8c468;
+  --watts: #7c6cd8;
   color-scheme: light dark;
   font-family: system-ui, sans-serif;
 }

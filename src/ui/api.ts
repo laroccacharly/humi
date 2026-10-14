@@ -9,6 +9,7 @@ export const ReadingsResponse = Schema.Struct({
       humidity: Schema.Number,
     })
   ),
+  plug: Schema.Array(Schema.Struct({ t: Schema.Number, watts: Schema.Number })),
   active: Schema.Array(
     Schema.Struct({ t: Schema.Number, battery: Schema.Number })
   ),
