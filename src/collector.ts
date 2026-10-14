@@ -1,10 +1,12 @@
 import { Duration, Effect, Option, Schedule } from "effect"
+import type { ChildProcessSpawner } from "effect/process"
 
 import type { Bluetooth, BluetoothError } from "./bluetooth.ts"
 import type { HumiConfig } from "./config.ts"
 import { activeScanSeconds } from "./config.ts"
 import type { ActiveReading, PassiveReading } from "./db/readings.ts"
 import { Readings } from "./db/readings.ts"
+import { plugSchedule, plugScheduler } from "./plug-scheduler.ts"
 import { activeScan, passiveScan } from "./scan.ts"
 
 /** Logs a failed scan and treats it as the meter not being seen. */
@@ -66,24 +68,43 @@ const everyMinutes = <A, E, R>(
 
 /**
  * Runs the passive scan every `passiveScanMinutes` and the active scan every
- * `activeScanMinutes`, forever, both starting right away.
+ * `activeScanMinutes`, forever, both starting right away. When the plug
+ * schedule is configured, each passive reading also switches the plug.
  */
 export const collect: (
   config: HumiConfig
-) => Effect.Effect<void, never, Bluetooth | Readings> = Effect.fn("collect")(
-  function* collect(config: HumiConfig) {
+) => Effect.Effect<
+  void,
+  never,
+  Bluetooth | Readings | ChildProcessSpawner.ChildProcessSpawner
+> = Effect.fn("collect")(function* collect(config: HumiConfig) {
+  yield* Effect.logInfo(
+    `Reading ${config.mac}: passive scan every ${config.passiveScanMinutes} min, active scan every ${config.activeScanMinutes} min for ${activeScanSeconds(config)}s`
+  )
+  const schedule = plugSchedule(config)
+  if (Option.isSome(schedule)) {
     yield* Effect.logInfo(
-      `Reading ${config.mac}: passive scan every ${config.passiveScanMinutes} min, active scan every ${config.activeScanMinutes} min for ${activeScanSeconds(config)}s`
-    )
-    return yield* Effect.all(
-      [
-        everyMinutes(config.passiveScanMinutes, recordPassiveScan(config.mac)),
-        everyMinutes(
-          config.activeScanMinutes,
-          recordActiveScan(config.mac, activeScanSeconds(config))
-        ),
-      ],
-      { concurrency: "unbounded", discard: true }
+      `Plug ${schedule.value.plugMac}: on at ${schedule.value.onHumidity}%, off at ${schedule.value.offHumidity}%`
     )
   }
-)
+  const updatePlug = Option.isSome(schedule)
+    ? Option.some(yield* plugScheduler(schedule.value))
+    : Option.none()
+  const passive = recordPassiveScan(config.mac).pipe(
+    Effect.tap((reading) =>
+      Option.isSome(reading) && Option.isSome(updatePlug)
+        ? updatePlug.value(reading.value.humidity)
+        : Effect.void
+    )
+  )
+  return yield* Effect.all(
+    [
+      everyMinutes(config.passiveScanMinutes, passive),
+      everyMinutes(
+        config.activeScanMinutes,
+        recordActiveScan(config.mac, activeScanSeconds(config))
+      ),
+    ],
+    { concurrency: "unbounded", discard: true }
+  )
+})

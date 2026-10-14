@@ -16,30 +16,58 @@ const minutes = Schema.Int.check(
 /** How long each active scan lasts when the config does not say. */
 export const defaultActiveScanSeconds = 30
 
-/** Which meter to read and how often, set with `humi config set`. */
-export class HumiConfig extends Schema.Class<HumiConfig>("HumiConfig")({
-  /** Bluetooth address of the meter. */
-  mac: Schema.String.check(
-    Schema.isPattern(/^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/u, {
-      expected: "a Bluetooth address like EC:0F:01:46:10:4A",
-    })
-  ),
-  /** Minutes between passive scans, which read temperature and humidity. */
-  passiveScanMinutes: minutes,
-  /** Minutes between active scans, which read the battery. */
-  activeScanMinutes: minutes,
-  /**
-   * How long each active scan lasts; `defaultActiveScanSeconds` when absent.
-   * Longer scans catch the battery more often but cost the meter more.
-   */
-  activeScanSeconds: Schema.optionalKey(
-    Schema.Int.check(
-      Schema.isGreaterThanOrEqualTo(1, {
-        expected: "a whole number of seconds",
-      })
+const address = Schema.String.check(
+  Schema.isPattern(/^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/u, {
+    expected: "a Bluetooth address like EC:0F:01:46:10:4A",
+  })
+)
+
+const humidity = Schema.Int.check(
+  Schema.isBetween(
+    { minimum: 0, maximum: 100 },
+    { expected: "a whole percentage of humidity" }
+  )
+)
+
+/**
+ * Which meter to read and how often, set with `humi config set`, and when
+ * when to switch the plug.
+ */
+export class HumiConfig extends Schema.Class<HumiConfig>("HumiConfig")(
+  Schema.Struct({
+    /** Bluetooth address of the meter. */
+    mac: address,
+    /** Bluetooth address of the SwitchBot Plug Mini that `humi plug` switches. */
+    plugMac: Schema.optionalKey(address),
+    /** Minutes between passive scans, which read temperature and humidity. */
+    passiveScanMinutes: minutes,
+    /** Minutes between active scans, which read the battery. */
+    activeScanMinutes: minutes,
+    /**
+     * How long each active scan lasts; `defaultActiveScanSeconds` when absent.
+     * Longer scans catch the battery more often but cost the meter more.
+     */
+    activeScanSeconds: Schema.optionalKey(
+      Schema.Int.check(
+        Schema.isGreaterThanOrEqualTo(1, {
+          expected: "a whole number of seconds",
+        })
+      )
+    ),
+    /** Humidity at or above which the plug turns on. */
+    plugOnHumidity: Schema.optionalKey(humidity),
+    /** Humidity at or below which the plug turns off. */
+    plugOffHumidity: Schema.optionalKey(humidity),
+  }).check(
+    Schema.makeFilter(
+      ({ plugOnHumidity, plugOffHumidity }) =>
+        plugOnHumidity === undefined ||
+        plugOffHumidity === undefined ||
+        plugOnHumidity > plugOffHumidity ||
+        "plugOnHumidity must be above plugOffHumidity"
     )
-  ),
-}) {}
+  )
+) {}
 
 /** The active scan duration, falling back to the default. */
 export const activeScanSeconds = (config: HumiConfig): number =>

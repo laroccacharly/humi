@@ -19,11 +19,28 @@ import {
 import { layer as databaseLayer } from "./db/database.ts"
 import { Readings } from "./db/readings.ts"
 import { findSwitchbots } from "./discover.ts"
+import type { PlugState } from "./plug.ts"
+import { plugStatus, switchPlug } from "./plug.ts"
 import { serve } from "./server.ts"
 import { setupBluetooth } from "./setup-bluetooth.ts"
 
 const macFlag = Flag.String("mac").pipe(
   Flag.withDescription("Bluetooth address of the meter"),
+  Flag.optional
+)
+
+const plugMacFlag = Flag.String("plug-mac").pipe(
+  Flag.withDescription("Bluetooth address of the SwitchBot Plug Mini"),
+  Flag.optional
+)
+
+const plugOnHumidityFlag = Flag.Int("plug-on-humidity").pipe(
+  Flag.withDescription("Humidity (%) at or above which the plug turns on"),
+  Flag.optional
+)
+
+const plugOffHumidityFlag = Flag.Int("plug-off-humidity").pipe(
+  Flag.withDescription("Humidity (%) at or below which the plug turns off"),
   Flag.optional
 )
 
@@ -157,6 +174,9 @@ const showConfig = (config: HumiConfig) =>
     [
       configPath,
       `mac           ${config.mac}`,
+      `plug mac      ${config.plugMac ?? "(not set)"}`,
+      `plug on at    ${config.plugOnHumidity === undefined ? "(not set)" : `${config.plugOnHumidity}%`}`,
+      `plug off at   ${config.plugOffHumidity === undefined ? "(not set)" : `${config.plugOffHumidity}%`}`,
       `passive scan  every ${config.passiveScanMinutes} min`,
       `active scan   every ${config.activeScanMinutes} min`,
       `              for ${activeScanSeconds(config)}s${config.activeScanSeconds === undefined ? " (default)" : ""}`,
@@ -167,6 +187,9 @@ const configSetCommand = Command.make(
   "set",
   {
     mac: macFlag,
+    plugMac: plugMacFlag,
+    plugOnHumidity: plugOnHumidityFlag,
+    plugOffHumidity: plugOffHumidityFlag,
     passiveScanMinutes: passiveScanMinutesFlag,
     activeScanMinutes: activeScanMinutesFlag,
     activeScanSeconds: activeScanSecondsFlag,
@@ -194,9 +217,30 @@ const configSetCommand = Command.make(
     const seconds = Option.orElse(flags.activeScanSeconds, () =>
       current.pipe(Option.flatMapNullishOr((c) => c.activeScanSeconds))
     )
+    const plugMac = Option.orElse(flags.plugMac, () =>
+      current.pipe(Option.flatMapNullishOr((c) => c.plugMac))
+    )
+    const plugOn = Option.orElse(flags.plugOnHumidity, () =>
+      current.pipe(Option.flatMapNullishOr((c) => c.plugOnHumidity))
+    )
+    const plugOff = Option.orElse(flags.plugOffHumidity, () =>
+      current.pipe(Option.flatMapNullishOr((c) => c.plugOffHumidity))
+    )
     const config = yield* Schema.decodeUnknownEffect(HumiConfig)({
       ...values.value,
       mac: values.value.mac.toUpperCase(),
+      ...Option.match(plugMac, {
+        onNone: () => ({}),
+        onSome: (value) => ({ plugMac: value.toUpperCase() }),
+      }),
+      ...Option.match(plugOn, {
+        onNone: () => ({}),
+        onSome: (value) => ({ plugOnHumidity: value }),
+      }),
+      ...Option.match(plugOff, {
+        onNone: () => ({}),
+        onSome: (value) => ({ plugOffHumidity: value }),
+      }),
       ...Option.match(seconds, {
         onNone: () => ({}),
         onSome: (value) => ({ activeScanSeconds: value }),
@@ -218,6 +262,65 @@ const configCommand = Command.make("config", {}, () =>
   Command.withSubcommands([configSetCommand])
 )
 
+const plugMacOverride = Flag.String("mac").pipe(
+  Flag.withDescription("Bluetooth address of the plug (default: config)"),
+  Flag.optional
+)
+
+/** The plug from `--mac`, or else the config's. */
+const plugAddress: (
+  mac: Option.Option<string>
+) => Effect.Effect<
+  string,
+  Effect.Error<typeof loadConfig>,
+  Effect.Services<typeof loadConfig>
+> = Effect.fn("plugAddress")(function* plugAddress(mac: Option.Option<string>) {
+  const address = Option.isSome(mac) ? mac.value : (yield* loadConfig).plugMac
+  if (address === undefined) {
+    return yield* new ConfigMissingError({
+      message:
+        "No plug configured; pass --mac or run `humi config set --plug-mac <address>`",
+    })
+  }
+  return address.toUpperCase()
+})
+
+const plugStateCommand = (state: PlugState) =>
+  Command.make(
+    state,
+    { mac: plugMacOverride },
+    Effect.fn("plugCommand")(function* plugCommand({ mac }) {
+      const address = yield* plugAddress(mac)
+      yield* switchPlug(address, state)
+      return yield* Console.log(`Plug ${address} ${state}`)
+    })
+  ).pipe(Command.withDescription(`Switch the SwitchBot Plug Mini ${state}`))
+
+const plugStatusCommand = Command.make(
+  "status",
+  { mac: plugMacOverride },
+  Effect.fn("plugStatusCommand")(function* plugStatusCommand({ mac }) {
+    const address = yield* plugAddress(mac)
+    const status = yield* plugStatus(address)
+    const rssi = Option.match(status.rssi, {
+      onNone: () => "rssi ?",
+      onSome: (dbm) => `rssi ${dbm}`,
+    })
+    return yield* Console.log(
+      `Plug ${address} ${status.on ? "on" : "off"}  ${status.watts.toFixed(1)} W  ${rssi}`
+    )
+  })
+).pipe(Command.withDescription("Show whether the plug is on, and its power"))
+
+const plugCommand = Command.make("plug").pipe(
+  Command.withDescription("Switch the SwitchBot Plug Mini"),
+  Command.withSubcommands([
+    plugStateCommand("on"),
+    plugStateCommand("off"),
+    plugStatusCommand,
+  ])
+)
+
 const humiService = serviceCommand({
   name: "humi",
   description: "humi humidity and temperature logger",
@@ -233,6 +336,7 @@ const humi = Command.make("humi").pipe(
     lsCommand,
     configCommand,
     bluetoothCommand,
+    plugCommand,
     setupBluetoothCommand,
     humiService,
   ])
