@@ -46,6 +46,21 @@ const migrations = SqliteMigrator.layer({
         )
       `
     }),
+    "0002_create_plug_readings": Effect.gen(function* createPlugReadings() {
+      const sql = yield* SqlClient.SqlClient
+      // `is_on` because ON is an SQL keyword.
+      yield* sql`
+        CREATE TABLE plug_readings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          mac TEXT NOT NULL,
+          is_on INTEGER NOT NULL,
+          watts REAL NOT NULL,
+          rssi INTEGER,
+          raw TEXT NOT NULL,
+          ${sql.literal(recordedAt)}
+        )
+      `
+    }),
   }),
 })
 

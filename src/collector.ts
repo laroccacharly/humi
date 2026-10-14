@@ -4,10 +4,14 @@ import type { ChildProcessSpawner } from "effect/process"
 import type { Bluetooth, BluetoothError } from "./bluetooth.ts"
 import type { HumiConfig } from "./config.ts"
 import { activeScanSeconds } from "./config.ts"
-import type { ActiveReading, PassiveReading } from "./db/readings.ts"
+import type {
+  ActiveReading,
+  PassiveReading,
+  PlugReading,
+} from "./db/readings.ts"
 import { Readings } from "./db/readings.ts"
 import { plugSchedule, plugScheduler } from "./plug-scheduler.ts"
-import { activeScan, passiveScan } from "./scan.ts"
+import { activeScan, passiveScan, plugScan } from "./scan.ts"
 
 /** Logs a failed scan and treats it as the meter not being seen. */
 const orNotSeen = <A>(
@@ -56,6 +60,24 @@ export const recordPassiveScan: (
     return Option.some(reading)
   })
 
+/** Reads the plug's latest broadcast and stores it, if the plug was heard. */
+export const recordPlugScan: (
+  mac: string
+) => Effect.Effect<Option.Option<PlugReading>, never, Bluetooth | Readings> =
+  Effect.fn("recordPlugScan")(function* recordPlugScan(mac: string) {
+    const readings = yield* Readings
+    const status = yield* orNotSeen(plugScan(mac))
+    if (Option.isNone(status)) {
+      yield* Effect.logInfo(`Plug scan: ${mac} not seen yet`)
+      return Option.none()
+    }
+    const reading = yield* readings.insertPlug(mac, status.value)
+    yield* Effect.logInfo(
+      `Plug #${reading.id} ${reading.is_on ? "on" : "off"} ${reading.watts.toFixed(1)} W rssi ${reading.rssi ?? "?"}`
+    )
+    return Option.some(reading)
+  })
+
 /** Runs `effect` now, then again `minutes` after each run finishes. */
 const everyMinutes = <A, E, R>(
   minutes: number,
@@ -68,8 +90,9 @@ const everyMinutes = <A, E, R>(
 
 /**
  * Runs the passive scan every `passiveScanMinutes` and the active scan every
- * `activeScanMinutes`, forever, both starting right away. When the plug
- * schedule is configured, each passive reading also switches the plug.
+ * `activeScanMinutes`, forever, both starting right away. With a plug in the
+ * config, each passive scan also records the plug's broadcast, and when the
+ * plug schedule is configured, each meter reading also switches the plug.
  */
 export const collect: (
   config: HumiConfig
@@ -90,13 +113,17 @@ export const collect: (
   const updatePlug = Option.isSome(schedule)
     ? Option.some(yield* plugScheduler(schedule.value))
     : Option.none()
-  const passive = recordPassiveScan(config.mac).pipe(
+  const meter = recordPassiveScan(config.mac).pipe(
     Effect.tap((reading) =>
       Option.isSome(reading) && Option.isSome(updatePlug)
         ? updatePlug.value(reading.value.humidity)
         : Effect.void
     )
   )
+  const passive =
+    config.plugMac === undefined
+      ? meter
+      : recordPlugScan(config.plugMac).pipe(Effect.andThen(meter))
   return yield* Effect.all(
     [
       everyMinutes(config.passiveScanMinutes, passive),

@@ -88,9 +88,10 @@ const runCommand = Command.make(
     }
 
     yield* run.pipe(Effect.timeoutOption(`${duration.value} seconds`))
-    const { passive, distinct, active } = yield* readings.summary(startedAt)
+    const { passive, distinct, plug, active } =
+      yield* readings.summary(startedAt)
     return yield* Console.log(
-      `In ${duration.value}s: ${passive} passive readings (${distinct} distinct advertisements), ${active} active readings`
+      `In ${duration.value}s: ${passive} passive readings (${distinct} distinct advertisements), ${plug} plug readings, ${active} active readings`
     )
   })
 ).pipe(
@@ -112,6 +113,12 @@ const lsCommand = Command.make(
         `  ${DateTime.formatIso(reading.recorded_at)}  ${reading.temperature.toFixed(1)}°C  ${reading.humidity}%  rssi ${reading.rssi ?? "?"}`
       )
     }
+    yield* Console.log("Plug readings")
+    for (const reading of yield* readings.latestPlug(limit)) {
+      yield* Console.log(
+        `  ${DateTime.formatIso(reading.recorded_at)}  ${reading.is_on ? "on " : "off"}  ${reading.watts.toFixed(1)} W  rssi ${reading.rssi ?? "?"}`
+      )
+    }
     yield* Console.log("Active readings")
     for (const reading of yield* readings.latestActive(limit)) {
       yield* Console.log(
@@ -119,7 +126,9 @@ const lsCommand = Command.make(
       )
     }
   })
-).pipe(Command.withDescription("Show the latest passive and active readings"))
+).pipe(
+  Command.withDescription("Show the latest passive, plug and active readings")
+)
 
 const setupBluetoothCommand = Command.make(
   "setup-bluetooth",
@@ -302,12 +311,8 @@ const plugStatusCommand = Command.make(
   Effect.fn("plugStatusCommand")(function* plugStatusCommand({ mac }) {
     const address = yield* plugAddress(mac)
     const status = yield* plugStatus(address)
-    const rssi = Option.match(status.rssi, {
-      onNone: () => "rssi ?",
-      onSome: (dbm) => `rssi ${dbm}`,
-    })
     return yield* Console.log(
-      `Plug ${address} ${status.on ? "on" : "off"}  ${status.watts.toFixed(1)} W  ${rssi}`
+      `Plug ${address} ${status.on ? "on" : "off"}  ${status.watts.toFixed(1)} W  rssi ${status.rssi ?? "?"}`
     )
   })
 ).pipe(Command.withDescription("Show whether the plug is on, and its power"))

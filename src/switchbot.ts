@@ -142,3 +142,37 @@ export const decodeBattery = (
   advertisement: Advertisement
 ): Option.Option<number> =>
   Option.map(Arr.get(advertisement.service, 2), (battery) => battery % 0x80)
+
+/** On/off state and power from a SwitchBot Plug Mini broadcast. */
+export class PlugStatus extends Schema.Class<PlugStatus>("PlugStatus")({
+  on: Schema.Boolean,
+  /** Power drawn through the plug, in watts. */
+  watts: Schema.Number,
+  rssi: Schema.NullOr(Schema.Int),
+  /** Manufacturer data as hex, to tell fresh advertisements from repeats. */
+  raw: Schema.String,
+}) {}
+
+/**
+ * Decodes a Plug Mini advertisement. Its manufacturer data follows its
+ * address with a sequence number, then `0x80` when on, and the power in
+ * tenths of a watt at bytes 10 and 11 (layout from pySwitchbot).
+ */
+export const decodePlug = (
+  advertisement: Advertisement
+): Option.Option<PlugStatus> =>
+  Option.all({
+    state: Arr.get(advertisement.manufacturer, 7),
+    high: Arr.get(advertisement.manufacturer, 10),
+    low: Arr.get(advertisement.manufacturer, 11),
+  }).pipe(
+    Option.map(
+      ({ state, high, low }) =>
+        new PlugStatus({
+          on: state === 0x80,
+          watts: ((high % 0x80) * 0x1_00 + low) / 10,
+          rssi: Option.getOrNull(advertisement.rssi),
+          raw: toHex(advertisement.manufacturer),
+        })
+    )
+  )

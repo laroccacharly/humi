@@ -1,7 +1,8 @@
 import { Array as Arr, Effect, Option, Schedule, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { parseInfo } from "./switchbot.ts"
+import type { PlugStatus } from "./switchbot.ts"
+import { decodePlug, parseInfo } from "./switchbot.ts"
 
 /** Raised when the plug could not be switched. */
 export class PlugError extends Schema.TaggedError<PlugError>()("PlugError", {
@@ -149,18 +150,9 @@ export const switchPlug: (
     )
   })
 
-/** What the plug broadcasts about itself. */
-export interface PlugStatus {
-  readonly on: boolean
-  /** Power drawn through the plug, in watts. */
-  readonly watts: number
-  readonly rssi: Option.Option<number>
-}
-
 /**
- * Reads the plug's state from its broadcast. Its manufacturer data follows
- * its address with a sequence number, then `0x80` when on, and the power in
- * tenths of a watt at bytes 10 and 11 (layout from pySwitchbot).
+ * Reads the plug's state from a broadcast heard just now, scanning for 5
+ * seconds. `humi run` gets it for free from its passive scan instead.
  */
 export const plugStatus: (
   mac: string
@@ -190,17 +182,7 @@ export const plugStatus: (
         (cause) => new PlugError({ message: "bluetoothctl failed", cause })
       )
     )
-  const advertisement = parseInfo(info)
-  return yield* Option.all({
-    state: Arr.get(advertisement.manufacturer, 7),
-    high: Arr.get(advertisement.manufacturer, 10),
-    low: Arr.get(advertisement.manufacturer, 11),
-  }).pipe(
-    Option.map(({ state, high, low }) => ({
-      on: state === 0x80,
-      watts: ((high % 0x80) * 0x1_00 + low) / 10,
-      rssi: advertisement.rssi,
-    })),
+  return yield* decodePlug(parseInfo(info)).pipe(
     Effect.fromOption,
     Effect.mapError(
       () =>

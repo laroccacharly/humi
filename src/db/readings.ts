@@ -2,7 +2,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { Model } from "effect/schema"
 import { SqlClient, SqlModel, SqlSchema } from "effect/sql"
 
-import type { Measurement } from "../switchbot.ts"
+import type { Measurement, PlugStatus } from "../switchbot.ts"
 
 // SQLite fills both in on insert; see `recordedAt` in database.ts.
 const id = Model.Field({ select: Schema.Int, update: Schema.Int })
@@ -21,6 +21,17 @@ export class PassiveReading extends Model.Class<PassiveReading>(
   recorded_at: recordedAt,
 }) {}
 
+/** What the plug broadcast: its on/off state and power. */
+export class PlugReading extends Model.Class<PlugReading>("PlugReading")({
+  id,
+  mac: Schema.String,
+  is_on: Schema.BooleanFromBit,
+  watts: Schema.Number,
+  rssi: Schema.NullOr(Schema.Int),
+  raw: Schema.String,
+  recorded_at: recordedAt,
+}) {}
+
 /** What an active scan got back: the scan response with the battery. */
 export class ActiveReading extends Model.Class<ActiveReading>("ActiveReading")({
   id,
@@ -34,10 +45,11 @@ export const Summary = Schema.Struct({
   passive: Schema.Int,
   /** Passive readings whose advertisement payload actually changed. */
   distinct: Schema.Int,
+  plug: Schema.Int,
   active: Schema.Int,
 })
 
-/** Storage for passive and active readings, one table each. */
+/** Storage for passive, plug and active readings, one table each. */
 export class Readings extends Context.Service<
   Readings,
   {
@@ -45,6 +57,10 @@ export class Readings extends Context.Service<
       mac: string,
       measurement: Measurement
     ) => Effect.Effect<PassiveReading>
+    readonly insertPlug: (
+      mac: string,
+      status: PlugStatus
+    ) => Effect.Effect<PlugReading>
     readonly insertActive: (
       mac: string,
       battery: number
@@ -52,6 +68,9 @@ export class Readings extends Context.Service<
     readonly latestPassive: (
       limit: number
     ) => Effect.Effect<readonly PassiveReading[]>
+    readonly latestPlug: (
+      limit: number
+    ) => Effect.Effect<readonly PlugReading[]>
     readonly latestActive: (
       limit: number
     ) => Effect.Effect<readonly ActiveReading[]>
@@ -74,6 +93,11 @@ export class Readings extends Context.Service<
         spanPrefix: "PassiveReadings",
         idColumn: "id",
       })
+      const plugRepo = yield* SqlModel.makeRepository(PlugReading, {
+        tableName: "plug_readings",
+        spanPrefix: "PlugReadings",
+        idColumn: "id",
+      })
       const activeRepo = yield* SqlModel.makeRepository(ActiveReading, {
         tableName: "active_readings",
         spanPrefix: "ActiveReadings",
@@ -85,6 +109,12 @@ export class Readings extends Context.Service<
         Result: PassiveReading,
         execute: (limit) =>
           sql`SELECT * FROM passive_readings ORDER BY id DESC LIMIT ${limit}`,
+      })
+      const findLatestPlug = SqlSchema.findAll({
+        Request: Schema.Int,
+        Result: PlugReading,
+        execute: (limit) =>
+          sql`SELECT * FROM plug_readings ORDER BY id DESC LIMIT ${limit}`,
       })
       const findLatestActive = SqlSchema.findAll({
         Request: Schema.Int,
@@ -114,6 +144,8 @@ export class Readings extends Context.Service<
                 WHERE recorded_at >= ${since}) AS passive,
               (SELECT COUNT(DISTINCT raw) FROM passive_readings
                 WHERE recorded_at >= ${since}) AS "distinct",
+              (SELECT COUNT(*) FROM plug_readings
+                WHERE recorded_at >= ${since}) AS plug,
               (SELECT COUNT(*) FROM active_readings
                 WHERE recorded_at >= ${since}) AS active
           `,
@@ -136,6 +168,23 @@ export class Readings extends Context.Service<
         Effect.orDie
       )
 
+      const insertPlug: (
+        mac: string,
+        status: PlugStatus
+      ) => Effect.Effect<PlugReading> = Effect.fn("Readings.insertPlug")(
+        function* insertPlug(mac: string, status: PlugStatus) {
+          const row = yield* PlugReading.insert.makeEffect({
+            mac,
+            is_on: status.on,
+            watts: status.watts,
+            rssi: status.rssi,
+            raw: status.raw,
+          })
+          return yield* plugRepo.insert(row)
+        },
+        Effect.orDie
+      )
+
       const insertActive: (
         mac: string,
         battery: number
@@ -153,6 +202,14 @@ export class Readings extends Context.Service<
         "Readings.latestPassive"
       )(function* latestPassive(limit: number) {
         return yield* findLatestPassive(limit)
+      }, Effect.orDie)
+
+      const latestPlug: (
+        limit: number
+      ) => Effect.Effect<readonly PlugReading[]> = Effect.fn(
+        "Readings.latestPlug"
+      )(function* latestPlug(limit: number) {
+        return yield* findLatestPlug(limit)
       }, Effect.orDie)
 
       const latestActive: (
@@ -186,8 +243,10 @@ export class Readings extends Context.Service<
 
       return Readings.of({
         insertPassive,
+        insertPlug,
         insertActive,
         latestPassive,
+        latestPlug,
         latestActive,
         passiveSince,
         activeSince,

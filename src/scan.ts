@@ -3,8 +3,13 @@ import { Effect } from "effect"
 
 import type { BluetoothError } from "./bluetooth.ts"
 import { Bluetooth } from "./bluetooth.ts"
-import type { Measurement } from "./switchbot.ts"
-import { decodeBattery, decodeOutdoorMeter, parseInfo } from "./switchbot.ts"
+import type { Measurement, PlugStatus } from "./switchbot.ts"
+import {
+  decodeBattery,
+  decodeOutdoorMeter,
+  decodePlug,
+  parseInfo,
+} from "./switchbot.ts"
 
 /**
  * Passive scan: the meter's latest broadcast, heard by the passive scan the
@@ -17,6 +22,18 @@ export const passiveScan: (
   Effect.fn("passiveScan")(function* passiveScan(mac: string) {
     const bluetooth = yield* Bluetooth
     return decodeOutdoorMeter(parseInfo(yield* bluetooth.info(mac)))
+  })
+
+/**
+ * The plug's latest broadcast, heard by the same passive scan as the meter
+ * (it matches every SwitchBot device). Carries its on/off state and power.
+ */
+export const plugScan: (
+  mac: string
+) => Effect.Effect<Option.Option<PlugStatus>, BluetoothError, Bluetooth> =
+  Effect.fn("plugScan")(function* plugScan(mac: string) {
+    const bluetooth = yield* Bluetooth
+    return decodePlug(parseInfo(yield* bluetooth.info(mac)))
   })
 
 /**
