@@ -60,6 +60,10 @@ body {
   font-size: 0.8rem;
 }
 
+.title .error {
+  color: var(--temperature);
+}
+
 .metric {
   display: flex;
   flex-direction: column;
@@ -86,6 +90,6 @@ body {
 }
 
 .chart {
-  height: 320px;
-  padding: 1.5rem 0.5rem;
+  height: 360px;
+  margin: 1rem 0.5rem;
 }

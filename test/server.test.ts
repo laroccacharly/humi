@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 
 import { Effect } from "effect"
 
-import { decodeReadings } from "../src/ui/api.ts"
+import { decodeReadings } from "../src/shared/api.ts"
 import { withServer } from "./seeded-server.ts"
 
 test("serves the UI page", async () => {
@@ -10,7 +10,7 @@ test("serves the UI page", async () => {
     const page = await fetch(url)
     return { status: page.status, html: await page.text() }
   })
-  // Bun bundles the UI on this first request and answers 500 if it fails.
+  // `serve` builds the UI before listening, so the page is the built one.
   expect(status).toBe(200)
   expect(html).toContain("<title>humi</title>")
 })

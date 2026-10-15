@@ -2,8 +2,11 @@ import { defineConfig } from "oxlint"
 import antiSlop from "ultracite/oxlint/anti-slop"
 import core from "ultracite/oxlint/core"
 
+import foldkit from "./oxlint.foldkit.ts"
+
 export default defineConfig({
-  extends: [core, antiSlop],
+  extends: [core, antiSlop, foldkit],
+  ignorePatterns: ["dist-ui/**"],
   jsPlugins: ["ts-lint"],
   options: {
     typeAware: true,
