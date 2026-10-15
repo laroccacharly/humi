@@ -1,6 +1,9 @@
-import { Duration, Effect, Option, Schedule } from "effect"
+import { Clock, Duration, Effect, Option, Ref, Schedule } from "effect"
+import type { Push } from "effect-lib/push"
 import type { ChildProcessSpawner } from "effect/process"
 
+import type { PlugWatch } from "./alert.ts"
+import { alert, watchPlug } from "./alert.ts"
 import type { Bluetooth, BluetoothError } from "./bluetooth.ts"
 import type { HumiConfig } from "./config.ts"
 import { activeScanSeconds } from "./config.ts"
@@ -93,13 +96,14 @@ const everyMinutes = <A, E, R>(
  * `activeScanMinutes`, forever, both starting right away. With a plug in the
  * config, each passive scan also records the plug's broadcast, and when the
  * plug schedule is configured, each meter reading also switches the plug.
+ * A plug that goes silent, and comes back, raises an alert.
  */
 export const collect: (
   config: HumiConfig
 ) => Effect.Effect<
   void,
   never,
-  Bluetooth | Readings | ChildProcessSpawner.ChildProcessSpawner
+  Bluetooth | Readings | ChildProcessSpawner.ChildProcessSpawner | Push
 > = Effect.fn("collect")(function* collect(config: HumiConfig) {
   yield* Effect.logInfo(
     `Reading ${config.mac}: passive scan every ${config.passiveScanMinutes} min, active scan every ${config.activeScanMinutes} min for ${activeScanSeconds(config)}s`
@@ -120,10 +124,31 @@ export const collect: (
         : Effect.void
     )
   )
+  const plugWatch = yield* Ref.make<PlugWatch>({
+    lastHeard: yield* Clock.currentTimeMillis,
+    alerted: false,
+  })
+  const watchedPlugScan: (
+    mac: string
+  ) => Effect.Effect<
+    void,
+    never,
+    Bluetooth | Readings | ChildProcessSpawner.ChildProcessSpawner | Push
+  > = Effect.fn("watchedPlugScan")(function* watchedPlugScan(mac: string) {
+    const heard = Option.isSome(yield* recordPlugScan(mac))
+    const now = yield* Clock.currentTimeMillis
+    const message = yield* Ref.modify(plugWatch, (watch) => {
+      const [next, alertMessage] = watchPlug(watch, heard, now)
+      return [alertMessage, next]
+    })
+    if (Option.isSome(message)) {
+      yield* alert(message.value)
+    }
+  })
   const passive =
     config.plugMac === undefined
       ? meter
-      : recordPlugScan(config.plugMac).pipe(Effect.andThen(meter))
+      : watchedPlugScan(config.plugMac).pipe(Effect.andThen(meter))
   return yield* Effect.all(
     [
       everyMinutes(config.passiveScanMinutes, passive),

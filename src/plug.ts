@@ -24,6 +24,10 @@ const commands = {
 
 export type PlugState = keyof typeof commands
 
+/** Why a plug that is not broadcasting cannot be reached. */
+const unreachable = (mac: string) =>
+  `Heard nothing from ${mac}. Is the plug powered, in range, and not connected to the SwitchBot app?`
+
 /** BlueZ's D-Bus object for a device. */
 const devicePath = (mac: string) =>
   `/org/bluez/hci0/dev_${mac.toUpperCase().replaceAll(":", "_")}`
@@ -70,9 +74,15 @@ export const switchPlug: (
         .pipe(Effect.orElseSucceed(() => 1))
 
     // BlueZ only connects to devices it has heard lately, so scan briefly
-    // when it does not know the plug yet.
-    if ((yield* exitCode(["bluetoothctl", "info", mac])) !== 0) {
+    // when it does not know the plug yet, and give up if it still does not.
+    const known = exitCode(["bluetoothctl", "info", mac]).pipe(
+      Effect.map((code) => code === 0)
+    )
+    if (!(yield* known)) {
       yield* exitCode(["bluetoothctl", "--timeout", "5", "scan", "le"])
+      if (!(yield* known)) {
+        yield* new PlugError({ message: unreachable(mac) })
+      }
     }
 
     yield* busctl(`Could not connect to ${mac}. Is the plug in range?`, [
@@ -187,7 +197,7 @@ export const plugStatus: (
     Effect.mapError(
       () =>
         new PlugError({
-          message: `Heard nothing from ${mac}. Is the plug in range?`,
+          message: unreachable(mac),
         })
     )
   )

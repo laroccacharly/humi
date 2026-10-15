@@ -1,8 +1,11 @@
 #!/usr/bin/env bun
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { Console, DateTime, Effect, Layer, Option, Schema } from "effect"
+import * as Credentials from "effect-lib/credentials"
+import * as Push from "effect-lib/push"
 import { serviceCommand } from "effect-lib/systemd"
 import { Command, Flag } from "effect/cli"
+import { FetchHttpClient } from "effect/http"
 
 import { Bluetooth } from "./bluetooth.ts"
 import { collect } from "./collector.ts"
@@ -326,6 +329,9 @@ const plugCommand = Command.make("plug").pipe(
   ])
 )
 
+/** The Pushover credentials that alerts are sent with. */
+const credentials = Credentials.make([Push.AppToken, Push.UserKey])
+
 const humiService = serviceCommand({
   name: "humi",
   description: "humi humidity and temperature logger",
@@ -344,13 +350,18 @@ const humi = Command.make("humi").pipe(
     plugCommand,
     setupBluetoothCommand,
     humiService,
+    ...credentials.commands,
   ])
 )
 
 const MainLive = Layer.mergeAll(
   BunServices.layer,
-  Readings.layer.pipe(Layer.provide(databaseLayer))
-).pipe(Layer.provide(BunServices.layer))
+  Readings.layer.pipe(Layer.provide(databaseLayer)),
+  Push.layer().pipe(Layer.provide(FetchHttpClient.layer))
+).pipe(
+  Layer.provideMerge(credentials.layer(Credentials.bunKeyring())),
+  Layer.provide(BunServices.layer)
+)
 
 BunRuntime.runMain(
   Command.run(humi, { version: "0.1.0" }).pipe(Effect.provide(MainLive))

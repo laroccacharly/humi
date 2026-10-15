@@ -1,6 +1,8 @@
 import { Effect, Option, Ref } from "effect"
+import type { Push } from "effect-lib/push"
 import type { ChildProcessSpawner } from "effect/process"
 
+import { alert } from "./alert.ts"
 import type { HumiConfig } from "./config.ts"
 import type { PlugState } from "./plug.ts"
 import { switchPlug } from "./plug.ts"
@@ -44,16 +46,22 @@ export const targetState = (
  * The current state is the last one the plug was switched to, unknown until
  * the first switch. A command is only sent when the target state differs
  * from the current state, and a failed switch leaves the current state as it
- * was, so the next reading retries it.
+ * was, so the next reading retries it. The first failure in a row raises an
+ * alert.
  */
 export const plugScheduler: (
   schedule: PlugSchedule
 ) => Effect.Effect<
   (
     humidity: number
-  ) => Effect.Effect<void, never, ChildProcessSpawner.ChildProcessSpawner>
+  ) => Effect.Effect<
+    void,
+    never,
+    ChildProcessSpawner.ChildProcessSpawner | Push
+  >
 > = Effect.fn("plugScheduler")(function* plugScheduler(schedule: PlugSchedule) {
   const currentState = yield* Ref.make(Option.none<PlugState>())
+  const failing = yield* Ref.make(false)
   return Effect.fn("updatePlug")(function* updatePlug(humidity: number) {
     const target = targetState(humidity, schedule)
     if (
@@ -64,6 +72,7 @@ export const plugScheduler: (
     }
     yield* switchPlug(schedule.plugMac, target.value).pipe(
       Effect.andThen(Ref.set(currentState, target)),
+      Effect.andThen(Ref.set(failing, false)),
       Effect.andThen(
         Effect.logInfo(`Plug ${target.value} at ${humidity}% humidity`)
       ),
@@ -71,6 +80,15 @@ export const plugScheduler: (
         Effect.logWarning(
           `Plug ${target.value} failed, retrying on the next reading`,
           error
+        ).pipe(
+          Effect.andThen(Ref.getAndSet(failing, true)),
+          Effect.flatMap((alreadyFailing) =>
+            alreadyFailing
+              ? Effect.void
+              : alert(
+                  `Plug could not turn ${target.value} at ${humidity}% humidity: ${error.message}`
+                )
+          )
         )
       )
     )
