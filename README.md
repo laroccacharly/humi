@@ -2,6 +2,10 @@
 
 Logs temperature and humidity from a SwitchBot Bluetooth meter into SQLite, charts them in a small web UI, and can switch a SwitchBot Plug Mini (e.g. a dehumidifier) on and off by humidity.
 
+## Demo
+
+[![humi demo](https://img.youtube.com/vi/LtPGFVgnTJw/maxresdefault.jpg)](https://youtu.be/LtPGFVgnTJw)
+
 ## Requirements
 
 - Linux with BlueZ (`bluetoothctl`, `busctl`) and a Bluetooth adapter
