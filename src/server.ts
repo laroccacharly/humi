@@ -44,13 +44,14 @@ const serveUi = async (request: Request) => {
   const { pathname } = new URL(request.url)
   const filePath = path.resolve(
     uiDirectory,
-    `.${pathname === "/" ? "/index.html" : pathname}`
+    `.${pathname.replace(/^\/$/u, "/index.html")}`
   )
   const file = Bun.file(filePath)
+  if (!filePath.startsWith(uiDirectory + path.sep) || !(await file.exists())) {
+    return new Response("Not found", { status: 404 })
+  }
   // Revalidate each load, so a rebuild's new hashed bundle is picked up.
-  return filePath.startsWith(uiDirectory + path.sep) && (await file.exists())
-    ? new Response(file, { headers: { "Cache-Control": "no-cache" } })
-    : new Response("Not found", { status: 404 })
+  return new Response(file, { headers: { "Cache-Control": "no-cache" } })
 }
 
 /** The last `uiDays` of readings, as the UI wants them. */

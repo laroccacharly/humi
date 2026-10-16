@@ -32,15 +32,16 @@ export const findSwitchbots: (
     (device) =>
       Effect.map(bluetooth.info(device.mac), (text) => {
         const advertisement = parseInfo(text)
-        return isSwitchbot(advertisement)
-          ? Option.some<Found>({
-              ...device,
-              rssi: advertisement.rssi,
-              measurement: isOutdoorMeter(device.mac, advertisement)
-                ? decodeOutdoorMeter(advertisement)
-                : Option.none(),
-            })
-          : Option.none<Found>()
+        if (!isSwitchbot(advertisement)) {
+          return Option.none<Found>()
+        }
+        return Option.some<Found>({
+          ...device,
+          rssi: advertisement.rssi,
+          measurement: Option.filter(decodeOutdoorMeter(advertisement), () =>
+            isOutdoorMeter(device.mac, advertisement)
+          ),
+        })
       }),
     { concurrency: 8 }
   )

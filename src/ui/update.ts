@@ -36,8 +36,9 @@ export const update = (model: Model, message: Message) =>
         model,
         modifyFields({
           shown: (shown) =>
-            metricKeys.filter((key) =>
-              key === metric ? !shown.includes(key) : shown.includes(key)
+            // The clicked metric flips; the others stay as they are.
+            metricKeys.filter(
+              (key) => shown.includes(key) !== (key === metric)
             ),
         })
       ),

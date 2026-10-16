@@ -87,7 +87,7 @@ export const switchPlug: (
     if (!(yield* known)) {
       yield* exitCode("bluetoothctl", ["--timeout", "5", "scan", "le"])
       if (!(yield* known)) {
-        yield* new PlugError({ message: unreachable(mac) })
+        return yield* new PlugError({ message: unreachable(mac) })
       }
     }
 
@@ -107,7 +107,7 @@ export const switchPlug: (
       "GetManagedObjects",
     ]).pipe(
       Effect.flatMap((json) =>
-        Schema.decodeUnknownEffect(ManagedObjects)(json).pipe(
+        Schema.decodeEffect(ManagedObjects)(json).pipe(
           Effect.mapError(
             (cause) =>
               new PlugError({ message: "Unexpected busctl output", cause })
@@ -135,7 +135,7 @@ export const switchPlug: (
       Effect.retry({ times: 10, schedule: Schedule.spaced("500 millis") })
     )
 
-    yield* characteristic.pipe(
+    return yield* characteristic.pipe(
       Effect.flatMap((path) =>
         busctl(`Could not switch ${mac} ${state}`, [
           "call",

@@ -14,12 +14,24 @@ export const metricKeys = Metric.literals
 
 export const metrics: Record<
   Metric,
-  { label: string; unit: string; axis: "celsius" | "percent" | "watts" }
+  {
+    label: string
+    unit: string
+    axis: "celsius" | "percent" | "watts"
+    /** Whether the line steps between readings instead of curving. */
+    step: "end" | false
+  }
 > = {
-  temperature: { label: "Temperature", unit: "°C", axis: "celsius" },
-  humidity: { label: "Humidity", unit: "%", axis: "percent" },
-  watts: { label: "Power", unit: " W", axis: "watts" },
-  battery: { label: "Battery", unit: "%", axis: "percent" },
+  temperature: {
+    label: "Temperature",
+    unit: "°C",
+    axis: "celsius",
+    step: false,
+  },
+  humidity: { label: "Humidity", unit: "%", axis: "percent", step: false },
+  // The plug switches, so power steps.
+  watts: { label: "Power", unit: " W", axis: "watts", step: "end" },
+  battery: { label: "Battery", unit: "%", axis: "percent", step: false },
 }
 
 type Point = readonly [t: number, value: number]

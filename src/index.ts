@@ -22,7 +22,6 @@ import {
   configPath,
   configSetUsage,
   configStore,
-  activeScanSeconds,
   defaultActiveScanSeconds,
   HumiConfig,
   loadConfig,
@@ -34,6 +33,7 @@ import type { PlugState } from "./plug.ts"
 import { plugStatus, switchPlug } from "./plug.ts"
 import { serve } from "./server.ts"
 import { setupBluetooth } from "./setup-bluetooth.ts"
+import { onOff } from "./switchbot.ts"
 
 const macFlag = Flag.String("mac").pipe(
   Flag.withDescription("Bluetooth address of the meter"),
@@ -127,7 +127,7 @@ const lsCommand = Command.make(
     yield* Console.log("Plug readings")
     for (const reading of yield* readings.latestPlug(limit)) {
       yield* Console.log(
-        `  ${DateTime.formatIso(reading.recorded_at)}  ${reading.is_on ? "on " : "off"}  ${reading.watts.toFixed(1)} W  rssi ${reading.rssi ?? "?"}`
+        `  ${DateTime.formatIso(reading.recorded_at)}  ${onOff(reading.is_on).padEnd(3)}  ${reading.watts.toFixed(1)} W  rssi ${reading.rssi ?? "?"}`
       )
     }
     yield* Console.log("Active readings")
@@ -144,7 +144,7 @@ const lsCommand = Command.make(
 const setupBluetoothCommand = Command.make(
   "setup-bluetooth",
   {},
-  setupBluetooth
+  () => setupBluetooth
 ).pipe(
   Command.withDescription(
     "One-time: enable BlueZ passive monitoring (asks for your password)"
@@ -189,17 +189,29 @@ const bluetoothCommand = Command.make("bluetooth").pipe(
   Command.withSubcommands([bluetoothLsCommand])
 )
 
+/** An optional config field with its unit, or `fallback` when unset. */
+const optionalField = (
+  config: HumiConfig,
+  key: "plugMac" | "plugOnHumidity" | "plugOffHumidity" | "activeScanSeconds",
+  unit: string,
+  fallback = "(not set)"
+) =>
+  Option.match(Option.fromUndefinedOr(config[key]), {
+    onNone: () => fallback,
+    onSome: (set) => `${set}${unit}`,
+  })
+
 const showConfig = (config: HumiConfig) =>
   Console.log(
     [
       configPath,
       `mac           ${config.mac}`,
-      `plug mac      ${config.plugMac ?? "(not set)"}`,
-      `plug on at    ${config.plugOnHumidity === undefined ? "(not set)" : `${config.plugOnHumidity}%`}`,
-      `plug off at   ${config.plugOffHumidity === undefined ? "(not set)" : `${config.plugOffHumidity}%`}`,
+      `plug mac      ${optionalField(config, "plugMac", "")}`,
+      `plug on at    ${optionalField(config, "plugOnHumidity", "%")}`,
+      `plug off at   ${optionalField(config, "plugOffHumidity", "%")}`,
       `passive scan  every ${config.passiveScanMinutes} min`,
       `active scan   every ${config.activeScanMinutes} min`,
-      `              for ${activeScanSeconds(config)}s${config.activeScanSeconds === undefined ? " (default)" : ""}`,
+      `              for ${optionalField(config, "activeScanSeconds", "s", `${defaultActiveScanSeconds}s (default)`)}`,
     ].join("\n")
   )
 
@@ -231,11 +243,11 @@ const configSetCommand = Command.make(
     }
     // Given flags override the saved config; optional fields left unset stay
     // out of the file, so their defaults apply.
+    const saved = yield* Effect.transposeOption(
+      current.pipe(Option.map(Schema.encodeEffect(HumiConfig)))
+    )
     const config = yield* Schema.decodeUnknownEffect(HumiConfig)({
-      ...Option.match(current, {
-        onNone: () => ({}),
-        onSome: Schema.encodeSync(HumiConfig),
-      }),
+      ...Option.getOrElse(saved, () => ({})),
       ...Record.getSomes<string, string | number>({
         mac: flags.mac.pipe(Option.map(upperCase)),
         plugMac: flags.plugMac.pipe(Option.map(upperCase)),
@@ -275,14 +287,17 @@ const plugAddress: (
   Effect.Error<typeof loadConfig>,
   Effect.Services<typeof loadConfig>
 > = Effect.fn("plugAddress")(function* plugAddress(mac: Option.Option<string>) {
-  const address = Option.isSome(mac) ? mac.value : (yield* loadConfig).plugMac
-  if (address === undefined) {
+  if (Option.isSome(mac)) {
+    return mac.value.toUpperCase()
+  }
+  const { plugMac } = yield* loadConfig
+  if (plugMac === undefined) {
     return yield* new ConfigMissingError({
       message:
         "No plug configured; pass --mac or run `humi config set --plug-mac <address>`",
     })
   }
-  return address.toUpperCase()
+  return plugMac
 })
 
 const plugStateCommand = (state: PlugState) =>
@@ -303,7 +318,7 @@ const plugStatusCommand = Command.make(
     const address = yield* plugAddress(mac)
     const status = yield* plugStatus(address)
     return yield* Console.log(
-      `Plug ${address} ${status.on ? "on" : "off"}  ${status.watts.toFixed(1)} W  rssi ${status.rssi ?? "?"}`
+      `Plug ${address} ${onOff(status.on)}  ${status.watts.toFixed(1)} W  rssi ${status.rssi ?? "?"}`
     )
   })
 ).pipe(Command.withDescription("Show whether the plug is on, and its power"))
@@ -343,12 +358,11 @@ const humi = Command.make("humi").pipe(
 )
 
 const MainLive = Layer.mergeAll(
-  BunServices.layer,
   Readings.layer.pipe(Layer.provide(databaseLayer)),
   Push.layer().pipe(Layer.provide(FetchHttpClient.layer))
 ).pipe(
   Layer.provideMerge(credentials.layer(Credentials.bunKeyring())),
-  Layer.provide(BunServices.layer)
+  Layer.provideMerge(BunServices.layer)
 )
 
 BunRuntime.runMain(

@@ -15,6 +15,7 @@ import type {
 import { Readings } from "./db/readings.ts"
 import { plugSchedule, plugScheduler } from "./plug-scheduler.ts"
 import { activeScan, passiveScan, plugScan } from "./scan.ts"
+import { onOff } from "./switchbot.ts"
 
 /** Logs a failed scan and treats it as the meter not being seen. */
 const orNotSeen = <A>(
@@ -42,7 +43,7 @@ const record = <A, Row>(options: {
         onSome: (found) =>
           options.store(found).pipe(
             Effect.tap((row) => Effect.logInfo(options.describe(row))),
-            Effect.map(Option.some)
+            Effect.asSome
           ),
       })
     )
@@ -84,7 +85,7 @@ export const recordPlugScan = (
     store: (status) =>
       Readings.use((readings) => readings.insertPlug(mac, status)),
     describe: (reading) =>
-      `Plug #${reading.id} ${reading.is_on ? "on" : "off"} ${reading.watts.toFixed(1)} W rssi ${reading.rssi ?? "?"}`,
+      `Plug #${reading.id} ${onOff(reading.is_on)} ${reading.watts.toFixed(1)} W rssi ${reading.rssi ?? "?"}`,
   }).pipe(Effect.withSpan("recordPlugScan"))
 
 /** Runs `effect` now, then again `minutes` after each run finishes. */
@@ -120,14 +121,17 @@ export const collect: (
       `Plug ${schedule.value.plugMac}: on at ${schedule.value.onHumidity}%, off at ${schedule.value.offHumidity}%`
     )
   }
-  const updatePlug = Option.isSome(schedule)
-    ? Option.some(yield* plugScheduler(schedule.value))
-    : Option.none()
+  // Without a schedule, readings leave the plug alone.
+  const updatePlug = yield* Option.match(schedule, {
+    onNone: () => Effect.succeed((_humidity: number) => Effect.void),
+    onSome: plugScheduler,
+  })
   const meter = recordPassiveScan(config.mac).pipe(
-    Effect.tap((reading) =>
-      Option.isSome(reading) && Option.isSome(updatePlug)
-        ? updatePlug.value(reading.value.humidity)
-        : Effect.void
+    Effect.tap(
+      Option.match({
+        onNone: () => Effect.void,
+        onSome: (reading) => updatePlug(reading.humidity),
+      })
     )
   )
   const plugWatch = yield* Ref.make<PlugWatch>({
@@ -151,10 +155,10 @@ export const collect: (
       yield* alert(message.value)
     }
   })
-  const passive =
-    config.plugMac === undefined
-      ? meter
-      : watchedPlugScan(config.plugMac).pipe(Effect.andThen(meter))
+  const passive = Option.match(Option.fromUndefinedOr(config.plugMac), {
+    onNone: () => meter,
+    onSome: (plugMac) => watchedPlugScan(plugMac).pipe(Effect.andThen(meter)),
+  })
   return yield* Effect.all(
     [
       everyMinutes(config.passiveScanMinutes, passive),

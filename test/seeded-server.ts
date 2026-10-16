@@ -44,8 +44,10 @@ export const withServer = async <A>(use: (url: URL) => Promise<A>) =>
   }).pipe(
     Effect.scoped,
     Effect.provide(
-      Readings.layer.pipe(Layer.provideMerge(layerWith(":memory:")))
+      Readings.layer.pipe(
+        Layer.provideMerge(layerWith(":memory:")),
+        Layer.provide(BunServices.layer)
+      )
     ),
-    Effect.provide(BunServices.layer),
     Effect.runPromise
   )

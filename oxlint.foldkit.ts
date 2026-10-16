@@ -3,10 +3,12 @@ import { defineConfig } from "oxlint"
 
 const rules = Object.fromEntries(
   Object.entries(recommended.rules).map(
-    ([rule, level]): [string, "error" | "off"] => [
-      rule,
-      level === "off" ? "off" : "error",
-    ]
+    ([rule, level]): [string, "error" | "off"] => {
+      if (level === "off") {
+        return [rule, "off"]
+      }
+      return [rule, "error"]
+    }
   )
 )
 

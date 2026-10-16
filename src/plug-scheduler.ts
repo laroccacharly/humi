@@ -1,4 +1,4 @@
-import { Effect, Option, Ref } from "effect"
+import { Boolean, Effect, Option, Ref } from "effect"
 import type { Push } from "effect-lib/push"
 import type { ChildProcessSpawner } from "effect/process"
 
@@ -83,11 +83,13 @@ export const plugScheduler: (
         ).pipe(
           Effect.andThen(Ref.getAndSet(failing, true)),
           Effect.flatMap((alreadyFailing) =>
-            alreadyFailing
-              ? Effect.void
-              : alert(
+            Boolean.match(alreadyFailing, {
+              onTrue: () => Effect.void,
+              onFalse: () =>
+                alert(
                   `Plug could not turn ${target.value} at ${humidity}% humidity: ${error.message}`
-                )
+                ),
+            })
           )
         )
       )

@@ -105,8 +105,7 @@ export const chartOption = (
     data: points[metric](readings).map(([t, value]) => [t, value]),
     // Draws one point per pixel or so, keeping the peaks, however many readings.
     sampling: "lttb",
-    // The plug switches, so power steps instead of curving.
-    step: metric === "watts" ? "end" : false,
+    step: metrics[metric].step,
     showSymbol: false,
     connectNulls: true,
     color: cssVar(`--${metric}`),
@@ -138,7 +137,13 @@ const mountChart = (element: Element, hostId: string) =>
   Stream.callback<MountChartMessage>((queue) =>
     Effect.gen(function* acquireChart() {
       if (!(element instanceof HTMLElement)) {
-        return yield* Effect.fail(new Error("The chart host is not an element"))
+        Queue.offerUnsafe(
+          queue,
+          Message.FailedMountChart({
+            reason: "The chart host is not an element",
+          })
+        )
+        return yield* Effect.void
       }
       const chart = yield* Effect.acquireRelease(
         Effect.try(() => echarts.init(element, null, { renderer: "canvas" })),

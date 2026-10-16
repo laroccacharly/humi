@@ -11,7 +11,7 @@
     "humi": "bun ./src/index.ts",
     "test": "bun test",
     "postinstall": "[ \"$(\"$HOME/.cache/lightpanda-node/lightpanda\" version 2>/dev/null)\" = 1.0.0 ] || lightpanda install 1.0.0",
-    "lint": "bun --bun oxlint .",
+    "lint": "bun --bun oxlint . && ts-lint-effect",
     "lint:fix": "bun --bun oxlint . --fix",
     "format": "oxfmt .",
     "typecheck": "tsc --noEmit"
@@ -34,7 +34,7 @@
     "oxlint": "1.83.0",
     "oxlint-tsgolint": "7",
     "playwright-core": "^1.63.0",
-    "ts-lint": "github:laroccacharly/ts-lint#v0.1.0",
+    "ts-lint": "github:laroccacharly/ts-lint#v0.5.0",
     "typescript": "^7.0.2",
     "ultracite": "^7.11.1"
   },

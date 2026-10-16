@@ -14,7 +14,7 @@ export class PassiveReading extends Model.Class<PassiveReading>(
 )({
   id,
   mac: Schema.String,
-  temperature: Schema.Number,
+  temperature: Schema.Finite,
   humidity: Schema.Int,
   rssi: Schema.NullOr(Schema.Int),
   raw: Schema.String,
@@ -26,7 +26,7 @@ export class PlugReading extends Model.Class<PlugReading>("PlugReading")({
   id,
   mac: Schema.String,
   is_on: Schema.BooleanFromBit,
-  watts: Schema.Number,
+  watts: Schema.Finite,
   rssi: Schema.NullOr(Schema.Int),
   raw: Schema.String,
   recorded_at: recordedAt,

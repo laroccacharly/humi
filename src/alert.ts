@@ -39,7 +39,7 @@ export const watchPlug = (
   if (heard) {
     return [
       { lastHeard: now, alerted: false },
-      watch.alerted ? Option.some("Plug is reachable again") : Option.none(),
+      Option.liftPredicate("Plug is reachable again", () => watch.alerted),
     ]
   }
   if (!watch.alerted && now - watch.lastHeard >= silenceAlertMinutes * 60_000) {

@@ -1,4 +1,4 @@
-import { Array as Arr, Option, Schema } from "effect"
+import { Array as Arr, Boolean, Option, Schema } from "effect"
 
 /** SwitchBot's Bluetooth company identifier, as printed by `bluetoothctl`. */
 export const switchbotCompanyId = "0x0969"
@@ -20,7 +20,7 @@ export interface Advertisement {
  * They are in the regular broadcast, so passive listening is enough.
  */
 export class Measurement extends Schema.Class<Measurement>("Measurement")({
-  temperature: Schema.Number,
+  temperature: Schema.Finite,
   humidity: Schema.Int,
   rssi: Schema.NullOr(Schema.Int),
   /** Manufacturer data as hex, to tell fresh advertisements from repeats. */
@@ -48,18 +48,23 @@ const bytesAfter = (lines: readonly string[], header: string): number[] => {
   return bytes
 }
 
-/** Extracts SwitchBot advertisement data from `bluetoothctl info <mac>`. */
-export const parseInfo = (text: string): Advertisement => {
-  const lines = text.split("\n")
+/** SwitchBot's manufacturer data, which may follow other companies'. */
+const manufacturerBytes = (lines: readonly string[]): number[] => {
   const keyIndex = lines.findIndex((line) =>
     line.includes(`ManufacturerData.Key: ${switchbotCompanyId}`)
   )
+  if (keyIndex === -1) {
+    return []
+  }
+  return bytesAfter(lines.slice(keyIndex), "ManufacturerData.Value:")
+}
+
+/** Extracts SwitchBot advertisement data from `bluetoothctl info <mac>`. */
+export const parseInfo = (text: string): Advertisement => {
+  const lines = text.split("\n")
   const rssi = /RSSI: \S+ \((?<dbm>-?\d+)\)/u.exec(text)?.groups?.dbm
   return {
-    manufacturer:
-      keyIndex === -1
-        ? []
-        : bytesAfter(lines.slice(keyIndex), "ManufacturerData.Value:"),
+    manufacturer: manufacturerBytes(lines),
     service: bytesAfter(lines, `ServiceData.${serviceUuid}:`),
     rssi: Option.map(Option.fromNullishOr(rssi), Number),
   }
@@ -87,9 +92,10 @@ export const parseDevices = (text: string): Device[] =>
     .split("\n")
     .flatMap((line) => {
       const groups = deviceLine.exec(line.trim())?.groups
-      return groups?.mac === undefined
-        ? []
-        : [{ mac: groups.mac, name: groups.name ?? "" }]
+      if (groups?.mac === undefined) {
+        return []
+      }
+      return [{ mac: groups.mac, name: groups.name ?? "" }]
     })
 
 /** Whether the advertisement carries SwitchBot manufacturer data. */
@@ -128,7 +134,11 @@ export const decodeOutdoorMeter = (
       ({ fraction, integer, humidity }) =>
         new Measurement({
           temperature:
-            (integer >= 0x80 ? 1 : -1) *
+            // The integer byte's top bit is set above zero.
+            Boolean.match(integer >= 0x80, {
+              onTrue: () => 1,
+              onFalse: () => -1,
+            }) *
             ((integer % 0x80) + (fraction % 0x10) / 10),
           humidity: humidity % 0x80,
           rssi: Option.getOrNull(advertisement.rssi),
@@ -143,11 +153,15 @@ export const decodeBattery = (
 ): Option.Option<number> =>
   Option.map(Arr.get(advertisement.service, 2), (battery) => battery % 0x80)
 
+/** "on" or "off", as `humi plug` and the logs show a plug's state. */
+export const onOff = (on: boolean): "on" | "off" =>
+  Boolean.match(on, { onTrue: () => "on", onFalse: () => "off" })
+
 /** On/off state and power from a SwitchBot Plug Mini broadcast. */
 export class PlugStatus extends Schema.Class<PlugStatus>("PlugStatus")({
   on: Schema.Boolean,
   /** Power drawn through the plug, in watts. */
-  watts: Schema.Number,
+  watts: Schema.Finite,
   rssi: Schema.NullOr(Schema.Int),
   /** Manufacturer data as hex, to tell fresh advertisements from repeats. */
   raw: Schema.String,

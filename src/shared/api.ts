@@ -7,14 +7,14 @@ export const uiDays = 14
 export const ReadingsResponse = Schema.Struct({
   passive: Schema.Array(
     Schema.Struct({
-      t: Schema.Number,
-      temperature: Schema.Number,
-      humidity: Schema.Number,
+      t: Schema.Finite,
+      temperature: Schema.Finite,
+      humidity: Schema.Finite,
     })
   ),
-  plug: Schema.Array(Schema.Struct({ t: Schema.Number, watts: Schema.Number })),
+  plug: Schema.Array(Schema.Struct({ t: Schema.Finite, watts: Schema.Finite })),
   active: Schema.Array(
-    Schema.Struct({ t: Schema.Number, battery: Schema.Number })
+    Schema.Struct({ t: Schema.Finite, battery: Schema.Finite })
   ),
 })
 

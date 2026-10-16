@@ -43,11 +43,11 @@ export const passiveAvailable: Effect.Effect<
 })
 
 /** Turns on passive monitoring once; asks for the password via pkexec. */
-export const setupBluetooth: () => Effect.Effect<
+export const setupBluetooth: Effect.Effect<
   void,
   SetupError,
   ChildProcessSpawner.ChildProcessSpawner
-> = Effect.fn("setupBluetooth")(function* setupBluetooth() {
+> = Effect.gen(function* setupBluetooth() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
   if (yield* passiveAvailable) {
@@ -85,4 +85,4 @@ export const setupBluetooth: () => Effect.Effect<
     Effect.retry({ schedule: Schedule.spaced("1 second"), times: 15 })
   )
   return yield* Effect.logInfo("Passive Bluetooth monitoring is enabled")
-})
+}).pipe(Effect.withSpan("setupBluetooth"))

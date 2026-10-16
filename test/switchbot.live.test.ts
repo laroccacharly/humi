@@ -19,9 +19,8 @@ const runLive = async <A, E>(
       Layer.mergeAll(
         Bluetooth.layer,
         Readings.layer.pipe(Layer.provide(layerWith(":memory:")))
-      )
+      ).pipe(Layer.provideMerge(BunServices.layer))
     ),
-    Effect.provide(BunServices.layer),
     Effect.scoped,
     Effect.runPromise
   )

@@ -1,13 +1,13 @@
 import { defineConfig } from "oxlint"
+import tsLint from "ts-lint/config"
 import antiSlop from "ultracite/oxlint/anti-slop"
 import core from "ultracite/oxlint/core"
 
 import foldkit from "./oxlint.foldkit.ts"
 
 export default defineConfig({
-  extends: [core, antiSlop, foldkit],
+  extends: [core, antiSlop, foldkit, tsLint],
   ignorePatterns: ["dist-ui/**"],
-  jsPlugins: ["ts-lint"],
   options: {
     typeAware: true,
     typeCheck: true,
@@ -17,9 +17,6 @@ export default defineConfig({
     "max-classes-per-file": "off",
     "max-depth": ["error", { max: 3 }],
     "sort-keys": "off",
-    "ts-lint/effect-fn-return-type": "error",
-    "ts-lint/no-undefined": "error",
-    "ts-lint/no-unknown": "warn",
     "unicorn/throw-new-error": "off",
   },
 })

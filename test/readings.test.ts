@@ -13,9 +13,11 @@ const runWithDatabase = async <A, E>(
 ) =>
   await effect.pipe(
     Effect.provide(
-      Readings.layer.pipe(Layer.provideMerge(layerWith(":memory:")))
+      Readings.layer.pipe(
+        Layer.provideMerge(layerWith(":memory:")),
+        Layer.provide(BunServices.layer)
+      )
     ),
-    Effect.provide(BunServices.layer),
     Effect.runPromise
   )
 
