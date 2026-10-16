@@ -16,12 +16,10 @@ test("serves the UI page", async () => {
 })
 
 test("serves the last 14 days of readings, oldest first", async () => {
-  const body = await withServer(async (url) => {
+  const data = await withServer(async (url) => {
     const response = await fetch(new URL("/api/readings", url))
-    const json: unknown = await response.json()
-    return json
+    return await Effect.runPromise(decodeReadings(await response.json()))
   })
-  const data = await Effect.runPromise(decodeReadings(body))
   expect(data.passive).toHaveLength(24)
   expect(data.passive.map((row) => row.humidity)).not.toContain(99)
   expect(data.passive.at(-1)?.humidity).toBe(45)

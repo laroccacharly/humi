@@ -18,7 +18,7 @@ export const defaultActiveScanSeconds = 30
 
 const address = Schema.String.check(
   Schema.isPattern(/^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/u, {
-    expected: "a Bluetooth address like EC:0F:01:46:10:4A",
+    expected: "a Bluetooth address like C0:FF:EE:12:34:56",
   })
 )
 
@@ -31,7 +31,7 @@ const humidity = Schema.Int.check(
 
 /**
  * Which meter to read and how often, set with `humi config set`, and when
- * when to switch the plug.
+ * to switch the plug.
  */
 export class HumiConfig extends Schema.Class<HumiConfig>("HumiConfig")(
   Schema.Struct({

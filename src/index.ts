@@ -1,6 +1,14 @@
 #!/usr/bin/env bun
 import { BunRuntime, BunServices } from "@effect/platform-bun"
-import { Console, DateTime, Effect, Layer, Option, Schema } from "effect"
+import {
+  Console,
+  DateTime,
+  Effect,
+  Layer,
+  Option,
+  Record,
+  Schema,
+} from "effect"
 import * as Credentials from "effect-lib/credentials"
 import * as Push from "effect-lib/push"
 import { serviceCommand } from "effect-lib/systemd"
@@ -195,6 +203,8 @@ const showConfig = (config: HumiConfig) =>
     ].join("\n")
   )
 
+const upperCase = (text: string) => text.toUpperCase()
+
 const configSetCommand = Command.make(
   "set",
   {
@@ -207,55 +217,33 @@ const configSetCommand = Command.make(
     activeScanSeconds: activeScanSecondsFlag,
   },
   Effect.fn("configSetCommand")(function* configSetCommand(flags) {
-    // The first `set` creates the config, so it needs every required field.
     const current = yield* configStore.load
-    const saved = <A>(get: (config: HumiConfig) => A) =>
-      current.pipe(Option.map(get))
-    const values = Option.all({
-      mac: Option.orElse(flags.mac, () => saved((c) => c.mac)),
-      passiveScanMinutes: Option.orElse(flags.passiveScanMinutes, () =>
-        saved((c) => c.passiveScanMinutes)
-      ),
-      activeScanMinutes: Option.orElse(flags.activeScanMinutes, () =>
-        saved((c) => c.activeScanMinutes)
-      ),
-    })
-    if (Option.isNone(values)) {
+    // The first `set` creates the config, so it needs every required field.
+    const required = [
+      flags.mac,
+      flags.passiveScanMinutes,
+      flags.activeScanMinutes,
+    ] as const
+    if (Option.isNone(current) && Option.isNone(Option.all(required))) {
       return yield* new ConfigMissingError({
         message: `No config at ${configPath} yet; pass ${configSetUsage}`,
       })
     }
-    // Optional, and left out of the file until set, so the default applies.
-    const seconds = Option.orElse(flags.activeScanSeconds, () =>
-      current.pipe(Option.flatMapNullishOr((c) => c.activeScanSeconds))
-    )
-    const plugMac = Option.orElse(flags.plugMac, () =>
-      current.pipe(Option.flatMapNullishOr((c) => c.plugMac))
-    )
-    const plugOn = Option.orElse(flags.plugOnHumidity, () =>
-      current.pipe(Option.flatMapNullishOr((c) => c.plugOnHumidity))
-    )
-    const plugOff = Option.orElse(flags.plugOffHumidity, () =>
-      current.pipe(Option.flatMapNullishOr((c) => c.plugOffHumidity))
-    )
+    // Given flags override the saved config; optional fields left unset stay
+    // out of the file, so their defaults apply.
     const config = yield* Schema.decodeUnknownEffect(HumiConfig)({
-      ...values.value,
-      mac: values.value.mac.toUpperCase(),
-      ...Option.match(plugMac, {
+      ...Option.match(current, {
         onNone: () => ({}),
-        onSome: (value) => ({ plugMac: value.toUpperCase() }),
+        onSome: Schema.encodeSync(HumiConfig),
       }),
-      ...Option.match(plugOn, {
-        onNone: () => ({}),
-        onSome: (value) => ({ plugOnHumidity: value }),
-      }),
-      ...Option.match(plugOff, {
-        onNone: () => ({}),
-        onSome: (value) => ({ plugOffHumidity: value }),
-      }),
-      ...Option.match(seconds, {
-        onNone: () => ({}),
-        onSome: (value) => ({ activeScanSeconds: value }),
+      ...Record.getSomes<string, string | number>({
+        mac: flags.mac.pipe(Option.map(upperCase)),
+        plugMac: flags.plugMac.pipe(Option.map(upperCase)),
+        plugOnHumidity: flags.plugOnHumidity,
+        plugOffHumidity: flags.plugOffHumidity,
+        passiveScanMinutes: flags.passiveScanMinutes,
+        activeScanMinutes: flags.activeScanMinutes,
+        activeScanSeconds: flags.activeScanSeconds,
       }),
     })
     yield* configStore.save(config)

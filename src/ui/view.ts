@@ -1,6 +1,7 @@
 import { Option } from "effect"
 import type { Document, Html, HtmlBuilder } from "foldkit/html"
 
+import { uiDays } from "../shared/api.ts"
 import { MountChart } from "./chart.ts"
 import { Message } from "./message.ts"
 import type { Metric } from "./metric.ts"
@@ -58,7 +59,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
               h.p(
                 [],
                 [
-                  "Readings from the last 14 days · drag to zoom, double-click to reset",
+                  `Readings from the last ${uiDays} days · drag to zoom, double-click to reset`,
                 ]
               ),
               Option.match(model.maybeError, {

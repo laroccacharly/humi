@@ -89,6 +89,42 @@ export class Readings extends Context.Service<
     Effect.gen(function* readingsLayer() {
       const sql = yield* SqlClient.SqlClient
 
+      /** The latest rows of `table`, and those recorded since a time. */
+      const queries = <Row extends Schema.Constraint>(
+        table: string,
+        row: Row
+      ) => {
+        const findLatest = SqlSchema.findAll({
+          Request: Schema.Int,
+          Result: row,
+          execute: (limit) =>
+            sql`SELECT * FROM ${sql(table)} ORDER BY id DESC LIMIT ${limit}`,
+        })
+        const findSince = SqlSchema.findAll({
+          Request: Schema.String,
+          Result: row,
+          execute: (since) =>
+            sql`SELECT * FROM ${sql(table)} WHERE recorded_at >= ${since} ORDER BY recorded_at`,
+        })
+        const attributes = { attributes: { table } }
+        return {
+          latest: (limit: number) =>
+            findLatest(limit).pipe(
+              Effect.orDie,
+              Effect.withSpan("Readings.latest", attributes)
+            ),
+          since: (since: string) =>
+            findSince(since).pipe(
+              Effect.orDie,
+              Effect.withSpan("Readings.since", attributes)
+            ),
+        }
+      }
+
+      const passive = queries("passive_readings", PassiveReading)
+      const plug = queries("plug_readings", PlugReading)
+      const active = queries("active_readings", ActiveReading)
+
       const passiveRepo = yield* SqlModel.makeRepository(PassiveReading, {
         tableName: "passive_readings",
         spanPrefix: "PassiveReadings",
@@ -105,42 +141,6 @@ export class Readings extends Context.Service<
         idColumn: "id",
       })
 
-      const findLatestPassive = SqlSchema.findAll({
-        Request: Schema.Int,
-        Result: PassiveReading,
-        execute: (limit) =>
-          sql`SELECT * FROM passive_readings ORDER BY id DESC LIMIT ${limit}`,
-      })
-      const findLatestPlug = SqlSchema.findAll({
-        Request: Schema.Int,
-        Result: PlugReading,
-        execute: (limit) =>
-          sql`SELECT * FROM plug_readings ORDER BY id DESC LIMIT ${limit}`,
-      })
-      const findLatestActive = SqlSchema.findAll({
-        Request: Schema.Int,
-        Result: ActiveReading,
-        execute: (limit) =>
-          sql`SELECT * FROM active_readings ORDER BY id DESC LIMIT ${limit}`,
-      })
-      const findPassiveSince = SqlSchema.findAll({
-        Request: Schema.String,
-        Result: PassiveReading,
-        execute: (since) =>
-          sql`SELECT * FROM passive_readings WHERE recorded_at >= ${since} ORDER BY recorded_at`,
-      })
-      const findPlugSince = SqlSchema.findAll({
-        Request: Schema.String,
-        Result: PlugReading,
-        execute: (since) =>
-          sql`SELECT * FROM plug_readings WHERE recorded_at >= ${since} ORDER BY recorded_at`,
-      })
-      const findActiveSince = SqlSchema.findAll({
-        Request: Schema.String,
-        Result: ActiveReading,
-        execute: (since) =>
-          sql`SELECT * FROM active_readings WHERE recorded_at >= ${since} ORDER BY recorded_at`,
-      })
       const findSummary = SqlSchema.findOne({
         Request: Schema.String,
         Result: Summary,
@@ -158,115 +158,42 @@ export class Readings extends Context.Service<
           `,
       })
 
-      const insertPassive: (
-        mac: string,
-        measurement: Measurement
-      ) => Effect.Effect<PassiveReading> = Effect.fn("Readings.insertPassive")(
-        function* insertPassive(mac: string, measurement: Measurement) {
-          const row = yield* PassiveReading.insert.makeEffect({
-            mac,
-            temperature: measurement.temperature,
-            humidity: measurement.humidity,
-            rssi: measurement.rssi,
-            raw: measurement.raw,
-          })
-          return yield* passiveRepo.insert(row)
-        },
-        Effect.orDie
-      )
-
-      const insertPlug: (
-        mac: string,
-        status: PlugStatus
-      ) => Effect.Effect<PlugReading> = Effect.fn("Readings.insertPlug")(
-        function* insertPlug(mac: string, status: PlugStatus) {
-          const row = yield* PlugReading.insert.makeEffect({
-            mac,
-            is_on: status.on,
-            watts: status.watts,
-            rssi: status.rssi,
-            raw: status.raw,
-          })
-          return yield* plugRepo.insert(row)
-        },
-        Effect.orDie
-      )
-
-      const insertActive: (
-        mac: string,
-        battery: number
-      ) => Effect.Effect<ActiveReading> = Effect.fn("Readings.insertActive")(
-        function* insertActive(mac: string, battery: number) {
-          const row = yield* ActiveReading.insert.makeEffect({ mac, battery })
-          return yield* activeRepo.insert(row)
-        },
-        Effect.orDie
-      )
-
-      const latestPassive: (
-        limit: number
-      ) => Effect.Effect<readonly PassiveReading[]> = Effect.fn(
-        "Readings.latestPassive"
-      )(function* latestPassive(limit: number) {
-        return yield* findLatestPassive(limit)
-      }, Effect.orDie)
-
-      const latestPlug: (
-        limit: number
-      ) => Effect.Effect<readonly PlugReading[]> = Effect.fn(
-        "Readings.latestPlug"
-      )(function* latestPlug(limit: number) {
-        return yield* findLatestPlug(limit)
-      }, Effect.orDie)
-
-      const latestActive: (
-        limit: number
-      ) => Effect.Effect<readonly ActiveReading[]> = Effect.fn(
-        "Readings.latestActive"
-      )(function* latestActive(limit: number) {
-        return yield* findLatestActive(limit)
-      }, Effect.orDie)
-
-      const passiveSince: (
-        since: string
-      ) => Effect.Effect<readonly PassiveReading[]> = Effect.fn(
-        "Readings.passiveSince"
-      )(function* passiveSince(since: string) {
-        return yield* findPassiveSince(since)
-      }, Effect.orDie)
-
-      const plugSince: (
-        since: string
-      ) => Effect.Effect<readonly PlugReading[]> = Effect.fn(
-        "Readings.plugSince"
-      )(function* plugSince(since: string) {
-        return yield* findPlugSince(since)
-      }, Effect.orDie)
-
-      const activeSince: (
-        since: string
-      ) => Effect.Effect<readonly ActiveReading[]> = Effect.fn(
-        "Readings.activeSince"
-      )(function* activeSince(since: string) {
-        return yield* findActiveSince(since)
-      }, Effect.orDie)
-
-      const summary: (since: string) => Effect.Effect<typeof Summary.Type> =
-        Effect.fn("Readings.summary")(function* summary(since: string) {
-          return yield* findSummary(since)
-        }, Effect.orDie)
-
       return Readings.of({
-        insertPassive,
-        insertPlug,
-        insertActive,
-        latestPassive,
-        latestPlug,
-        latestActive,
-        passiveSince,
-        plugSince,
-        activeSince,
-        summary,
+        insertPassive: (mac, measurement) =>
+          PassiveReading.insert
+            .makeEffect({
+              mac,
+              temperature: measurement.temperature,
+              humidity: measurement.humidity,
+              rssi: measurement.rssi,
+              raw: measurement.raw,
+            })
+            .pipe(Effect.flatMap(passiveRepo.insert), Effect.orDie),
+        insertPlug: (mac, status) =>
+          PlugReading.insert
+            .makeEffect({
+              mac,
+              is_on: status.on,
+              watts: status.watts,
+              rssi: status.rssi,
+              raw: status.raw,
+            })
+            .pipe(Effect.flatMap(plugRepo.insert), Effect.orDie),
+        insertActive: (mac, battery) =>
+          ActiveReading.insert
+            .makeEffect({ mac, battery })
+            .pipe(Effect.flatMap(activeRepo.insert), Effect.orDie),
+        latestPassive: passive.latest,
+        latestPlug: plug.latest,
+        latestActive: active.latest,
+        passiveSince: passive.since,
+        plugSince: plug.since,
+        activeSince: active.since,
+        summary: (since) =>
+          findSummary(since).pipe(
+            Effect.orDie,
+            Effect.withSpan("Readings.summary")
+          ),
       })
     })
   )

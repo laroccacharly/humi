@@ -5,6 +5,7 @@ import { DateTime, Duration, Effect } from "effect"
 
 import { Readings } from "./db/readings.ts"
 import type { ReadingsResponse } from "./shared/api.ts"
+import { uiDays } from "./shared/api.ts"
 
 const uiRoot = path.join(import.meta.dir, "ui")
 
@@ -25,7 +26,7 @@ const buildUi = Effect.runSync(
           configFile: false,
           root: uiRoot,
           logLevel: "warn",
-          // ECharts alone is past Vite's 500 kB warning; fine on a LAN.
+          // ECharts alone is past Vite's 500 kB warning; fine when served locally.
           build: {
             outDir: uiDirectory,
             emptyOutDir: true,
@@ -51,9 +52,6 @@ const serveUi = async (request: Request) => {
     ? new Response(file, { headers: { "Cache-Control": "no-cache" } })
     : new Response("Not found", { status: 404 })
 }
-
-/** How far back the UI looks. */
-export const uiDays = 14
 
 /** The last `uiDays` of readings, as the UI wants them. */
 const recentReadings: Effect.Effect<
@@ -86,7 +84,8 @@ const recentReadings: Effect.Effect<
 })
 
 /**
- * Serves the UI on `port` (0 picks a free one) until the scope closes. The
+ * Serves the UI on localhost at `port` (0 picks a free one) until the scope
+ * closes, so only this machine can see the readings. The
  * UI is built from source first, so each start serves the current code.
  */
 export const serve: (
@@ -98,6 +97,7 @@ export const serve: (
     const server = yield* Effect.acquireRelease(
       Effect.sync(() =>
         Bun.serve({
+          hostname: "localhost",
           port,
           development: false,
           routes: {

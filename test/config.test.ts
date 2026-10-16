@@ -5,7 +5,7 @@ import { Schema } from "effect"
 import { activeScanSeconds, HumiConfig } from "../src/config.ts"
 
 const decode = Schema.decodeUnknownExit(HumiConfig)
-const mac = "EC:0F:01:46:10:4A"
+const mac = "C0:FF:EE:12:34:56"
 const intervals = { passiveScanMinutes: 1, activeScanMinutes: 1440 }
 
 test("accepts an address and a frequency", () => {
@@ -14,8 +14,8 @@ test("accepts an address and a frequency", () => {
 
 test("rejects a malformed address and intervals under a minute", () => {
   for (const input of [
-    { mac: "EC:0F:01:46:10", ...intervals },
-    { mac: "ec:0f:01:46:10:4a", ...intervals },
+    { mac: "C0:FF:EE:12:34", ...intervals },
+    { mac: "c0:ff:ee:12:34:56", ...intervals },
     { mac, ...intervals, passiveScanMinutes: 0 },
     { mac, ...intervals, activeScanMinutes: 1.5 },
     { mac, passiveScanMinutes: 1 },

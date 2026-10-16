@@ -23,15 +23,15 @@ const measurement = new Measurement({
   temperature: 18.1,
   humidity: 45,
   rssi: -54,
-  raw: "ec0f0146104a130208972200",
+  raw: "c0ffee123456130208972200",
 })
 
 test("passive and active readings go to their own tables", async () => {
   const { passive, active } = await runWithDatabase(
     Effect.gen(function* insertBoth() {
       const readings = yield* Readings
-      yield* readings.insertPassive("EC:0F:01:46:10:4A", measurement)
-      yield* readings.insertActive("EC:0F:01:46:10:4A", 100)
+      yield* readings.insertPassive("C0:FF:EE:12:34:56", measurement)
+      yield* readings.insertActive("C0:FF:EE:12:34:56", 100)
       return {
         passive: yield* readings.latestPassive(10),
         active: yield* readings.latestActive(10),
@@ -49,8 +49,8 @@ test("SQLite stamps both tables with the same ISO format", async () => {
     Effect.gen(function* readStamps() {
       const readings = yield* Readings
       const sql = yield* SqlClient.SqlClient
-      yield* readings.insertPassive("EC:0F:01:46:10:4A", measurement)
-      yield* readings.insertActive("EC:0F:01:46:10:4A", 100)
+      yield* readings.insertPassive("C0:FF:EE:12:34:56", measurement)
+      yield* readings.insertActive("C0:FF:EE:12:34:56", 100)
       return yield* sql<{ readonly recorded_at: string }>`
         SELECT recorded_at FROM passive_readings
         UNION ALL SELECT recorded_at FROM active_readings

@@ -32,6 +32,14 @@ const unreachable = (mac: string) =>
 const devicePath = (mac: string) =>
   `/org/bluez/hci0/dev_${mac.toUpperCase().replaceAll(":", "_")}`
 
+/** Runs a command for its exit code alone, which is 1 when it cannot run. */
+const exitCode = (command: string, args: readonly string[]) =>
+  ChildProcessSpawner.ChildProcessSpawner.use((spawner) =>
+    spawner.exitCode(
+      ChildProcess.make(command, args, { stdout: "ignore", stderr: "ignore" })
+    )
+  ).pipe(Effect.orElseSucceed(() => 1))
+
 /** `GetManagedObjects` as printed by `busctl --json=short`. */
 const ManagedObjects = Schema.fromJsonString(
   Schema.Struct({
@@ -63,35 +71,30 @@ export const switchPlug: (
       spawner
         .string(ChildProcess.make("busctl", ["--system", ...args]))
         .pipe(Effect.mapError((cause) => new PlugError({ message, cause })))
-    const exitCode = (args: readonly string[]) =>
-      spawner
-        .exitCode(
-          ChildProcess.make(args[0] ?? "", args.slice(1), {
-            stdout: "ignore",
-            stderr: "ignore",
-          })
-        )
-        .pipe(Effect.orElseSucceed(() => 1))
+    const deviceCall = (method: string) => [
+      "call",
+      "org.bluez",
+      device,
+      "org.bluez.Device1",
+      method,
+    ]
 
     // BlueZ only connects to devices it has heard lately, so scan briefly
     // when it does not know the plug yet, and give up if it still does not.
-    const known = exitCode(["bluetoothctl", "info", mac]).pipe(
+    const known = exitCode("bluetoothctl", ["info", mac]).pipe(
       Effect.map((code) => code === 0)
     )
     if (!(yield* known)) {
-      yield* exitCode(["bluetoothctl", "--timeout", "5", "scan", "le"])
+      yield* exitCode("bluetoothctl", ["--timeout", "5", "scan", "le"])
       if (!(yield* known)) {
         yield* new PlugError({ message: unreachable(mac) })
       }
     }
 
-    yield* busctl(`Could not connect to ${mac}. Is the plug in range?`, [
-      "call",
-      "org.bluez",
-      device,
-      "org.bluez.Device1",
-      "Connect",
-    ]).pipe(Effect.retry({ times: 2, schedule: Schedule.spaced("1 second") }))
+    yield* busctl(
+      `Could not connect to ${mac}. Is the plug in range?`,
+      deviceCall("Connect")
+    ).pipe(Effect.retry({ times: 2, schedule: Schedule.spaced("1 second") }))
 
     // The characteristics appear once BlueZ has resolved the services, which
     // can take a moment after the connection.
@@ -147,15 +150,7 @@ export const switchPlug: (
         ])
       ),
       Effect.ensuring(
-        exitCode([
-          "busctl",
-          "--system",
-          "call",
-          "org.bluez",
-          device,
-          "org.bluez.Device1",
-          "Disconnect",
-        ])
+        exitCode("busctl", ["--system", ...deviceCall("Disconnect")])
       )
     )
   })
@@ -172,19 +167,9 @@ export const plugStatus: (
   ChildProcessSpawner.ChildProcessSpawner
 > = Effect.fn("plugStatus")(function* plugStatus(mac: string) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const run = (args: readonly string[]) =>
-    spawner
-      .exitCode(
-        ChildProcess.make("bluetoothctl", args, {
-          stdout: "ignore",
-          stderr: "ignore",
-        })
-      )
-      .pipe(Effect.orElseSucceed(() => 1))
-
   // Drop the cached broadcast so the status comes from one heard just now.
-  yield* run(["remove", mac])
-  yield* run(["--timeout", "5", "scan", "le"])
+  yield* exitCode("bluetoothctl", ["remove", mac])
+  yield* exitCode("bluetoothctl", ["--timeout", "5", "scan", "le"])
   const info = yield* spawner
     .string(ChildProcess.make("bluetoothctl", ["info", mac]))
     .pipe(

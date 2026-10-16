@@ -25,61 +25,67 @@ const orNotSeen = <A>(
     Effect.orElseSucceed(Option.none<A>)
   )
 
+/**
+ * Runs `scan` and stores what it found, logging the stored row, or runs
+ * `notSeen` when it found nothing.
+ */
+const record = <A, Row>(options: {
+  readonly scan: Effect.Effect<Option.Option<A>, BluetoothError, Bluetooth>
+  readonly notSeen: Effect.Effect<void>
+  readonly store: (found: A) => Effect.Effect<Row, never, Readings>
+  readonly describe: (row: Row) => string
+}): Effect.Effect<Option.Option<Row>, never, Bluetooth | Readings> =>
+  orNotSeen(options.scan).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => options.notSeen.pipe(Effect.as(Option.none<Row>())),
+        onSome: (found) =>
+          options.store(found).pipe(
+            Effect.tap((row) => Effect.logInfo(options.describe(row))),
+            Effect.map(Option.some)
+          ),
+      })
+    )
+  )
+
 /** Runs an active scan and stores the battery, if the meter answered. */
-export const recordActiveScan: (
+export const recordActiveScan = (
   mac: string,
   seconds: number
-) => Effect.Effect<Option.Option<ActiveReading>, never, Bluetooth | Readings> =
-  Effect.fn("recordActiveScan")(function* recordActiveScan(
-    mac: string,
-    seconds: number
-  ) {
-    const readings = yield* Readings
-    const battery = yield* orNotSeen(activeScan(mac, seconds))
-    if (Option.isNone(battery)) {
-      yield* Effect.logWarning(`Active scan: battery of ${mac} not seen`)
-      return Option.none()
-    }
-    const reading = yield* readings.insertActive(mac, battery.value)
-    yield* Effect.logInfo(`Active #${reading.id} battery ${reading.battery}%`)
-    return Option.some(reading)
-  })
+): Effect.Effect<Option.Option<ActiveReading>, never, Bluetooth | Readings> =>
+  record({
+    scan: activeScan(mac, seconds),
+    notSeen: Effect.logWarning(`Active scan: battery of ${mac} not seen`),
+    store: (battery) =>
+      Readings.use((readings) => readings.insertActive(mac, battery)),
+    describe: (reading) => `Active #${reading.id} battery ${reading.battery}%`,
+  }).pipe(Effect.withSpan("recordActiveScan"))
 
 /** Runs a passive scan and stores the measurement, if the meter was seen. */
-export const recordPassiveScan: (
+export const recordPassiveScan = (
   mac: string
-) => Effect.Effect<Option.Option<PassiveReading>, never, Bluetooth | Readings> =
-  Effect.fn("recordPassiveScan")(function* recordPassiveScan(mac: string) {
-    const readings = yield* Readings
-    const measurement = yield* orNotSeen(passiveScan(mac))
-    if (Option.isNone(measurement)) {
-      yield* Effect.logInfo(`Passive scan: ${mac} not seen yet`)
-      return Option.none()
-    }
-    const reading = yield* readings.insertPassive(mac, measurement.value)
-    yield* Effect.logInfo(
-      `Passive #${reading.id} ${reading.temperature.toFixed(1)}°C ${reading.humidity}% rssi ${reading.rssi ?? "?"}`
-    )
-    return Option.some(reading)
-  })
+): Effect.Effect<Option.Option<PassiveReading>, never, Bluetooth | Readings> =>
+  record({
+    scan: passiveScan(mac),
+    notSeen: Effect.logInfo(`Passive scan: ${mac} not seen yet`),
+    store: (measurement) =>
+      Readings.use((readings) => readings.insertPassive(mac, measurement)),
+    describe: (reading) =>
+      `Passive #${reading.id} ${reading.temperature.toFixed(1)}°C ${reading.humidity}% rssi ${reading.rssi ?? "?"}`,
+  }).pipe(Effect.withSpan("recordPassiveScan"))
 
 /** Reads the plug's latest broadcast and stores it, if the plug was heard. */
-export const recordPlugScan: (
+export const recordPlugScan = (
   mac: string
-) => Effect.Effect<Option.Option<PlugReading>, never, Bluetooth | Readings> =
-  Effect.fn("recordPlugScan")(function* recordPlugScan(mac: string) {
-    const readings = yield* Readings
-    const status = yield* orNotSeen(plugScan(mac))
-    if (Option.isNone(status)) {
-      yield* Effect.logInfo(`Plug scan: ${mac} not seen yet`)
-      return Option.none()
-    }
-    const reading = yield* readings.insertPlug(mac, status.value)
-    yield* Effect.logInfo(
-      `Plug #${reading.id} ${reading.is_on ? "on" : "off"} ${reading.watts.toFixed(1)} W rssi ${reading.rssi ?? "?"}`
-    )
-    return Option.some(reading)
-  })
+): Effect.Effect<Option.Option<PlugReading>, never, Bluetooth | Readings> =>
+  record({
+    scan: plugScan(mac),
+    notSeen: Effect.logInfo(`Plug scan: ${mac} not seen yet`),
+    store: (status) =>
+      Readings.use((readings) => readings.insertPlug(mac, status)),
+    describe: (reading) =>
+      `Plug #${reading.id} ${reading.is_on ? "on" : "off"} ${reading.watts.toFixed(1)} W rssi ${reading.rssi ?? "?"}`,
+  }).pipe(Effect.withSpan("recordPlugScan"))
 
 /** Runs `effect` now, then again `minutes` after each run finishes. */
 const everyMinutes = <A, E, R>(

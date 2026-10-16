@@ -11,6 +11,10 @@ import {
   parseInfo,
 } from "./switchbot.ts"
 
+/** The device's latest advertisement, as BlueZ has it cached. */
+const latestAdvertisement = (mac: string) =>
+  Bluetooth.use((bluetooth) => bluetooth.info(mac)).pipe(Effect.map(parseInfo))
+
 /**
  * Passive scan: the meter's latest broadcast, heard by the passive scan the
  * `Bluetooth` layer keeps running. Never sends the meter anything. Carries
@@ -20,8 +24,7 @@ export const passiveScan: (
   mac: string
 ) => Effect.Effect<Option.Option<Measurement>, BluetoothError, Bluetooth> =
   Effect.fn("passiveScan")(function* passiveScan(mac: string) {
-    const bluetooth = yield* Bluetooth
-    return decodeOutdoorMeter(parseInfo(yield* bluetooth.info(mac)))
+    return decodeOutdoorMeter(yield* latestAdvertisement(mac))
   })
 
 /**
@@ -32,8 +35,7 @@ export const plugScan: (
   mac: string
 ) => Effect.Effect<Option.Option<PlugStatus>, BluetoothError, Bluetooth> =
   Effect.fn("plugScan")(function* plugScan(mac: string) {
-    const bluetooth = yield* Bluetooth
-    return decodePlug(parseInfo(yield* bluetooth.info(mac)))
+    return decodePlug(yield* latestAdvertisement(mac))
   })
 
 /**
@@ -45,7 +47,6 @@ export const activeScan: (
   seconds: number
 ) => Effect.Effect<Option.Option<number>, BluetoothError, Bluetooth> =
   Effect.fn("activeScan")(function* activeScan(mac: string, seconds: number) {
-    const bluetooth = yield* Bluetooth
-    yield* bluetooth.activeScan(seconds)
-    return decodeBattery(parseInfo(yield* bluetooth.info(mac)))
+    yield* Bluetooth.use((bluetooth) => bluetooth.activeScan(seconds))
+    return decodeBattery(yield* latestAdvertisement(mac))
   })

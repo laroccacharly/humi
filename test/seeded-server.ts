@@ -6,7 +6,7 @@ import { layerWith } from "../src/db/database.ts"
 import { Readings } from "../src/db/readings.ts"
 import { serve } from "../src/server.ts"
 
-const mac = "EC:0F:01:46:10:4A"
+const mac = "C0:FF:EE:12:34:56"
 const hour = 3_600_000
 
 /** A day of fake hourly readings, and one from before the UI's window. */
@@ -27,7 +27,7 @@ const seed = Effect.gen(function* seed() {
   `
   yield* sql`
     INSERT INTO plug_readings (mac, is_on, watts, rssi, raw, recorded_at)
-    VALUES ('D8:3B:DA:11:C1:4A', 1, 40, -60, 'plug', ${new Date(now - hour).toISOString()})
+    VALUES ('C0:FF:EE:65:43:21', 1, 40, -60, 'plug', ${new Date(now - hour).toISOString()})
   `
   yield* sql`
     INSERT INTO active_readings (mac, battery, recorded_at)

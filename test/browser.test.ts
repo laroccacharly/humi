@@ -18,7 +18,7 @@ const freePort = () => {
 }
 
 // Lightpanda runs the page's JavaScript but draws nothing, so this checks
-// what React rendered from the seeded readings, not the chart's lines.
+// what the UI rendered from the seeded readings, not the chart's lines.
 test("the UI shows the latest readings", async () => {
   const metrics = await withServer(async (url) => {
     const port = freePort()
