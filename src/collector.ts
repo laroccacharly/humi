@@ -14,6 +14,8 @@ import type {
 } from "./db/readings.ts"
 import { Readings } from "./db/readings.ts"
 import { plugSchedule, plugScheduler } from "./plug-scheduler.ts"
+import type { PlugState } from "./plug.ts"
+import { switchPlug } from "./plug.ts"
 import { activeScan, passiveScan, plugScan } from "./scan.ts"
 import { onOff } from "./switchbot.ts"
 
@@ -102,7 +104,8 @@ const everyMinutes = <A, E, R>(
  * Runs the passive scan every `passiveScanMinutes` and the active scan every
  * `activeScanMinutes`, forever, both starting right away. With a plug in the
  * config, each passive scan also records the plug's broadcast, and when the
- * plug schedule is configured, each meter reading also switches the plug.
+ * plug schedule is configured, each meter reading also switches the plug,
+ * judged by the state in that broadcast.
  * A plug that goes silent, and comes back, raises an alert.
  */
 export const collect: (
@@ -123,17 +126,26 @@ export const collect: (
   }
   // Without a schedule, readings leave the plug alone.
   const updatePlug = yield* Option.match(schedule, {
-    onNone: () => Effect.succeed((_humidity: number) => Effect.void),
-    onSome: plugScheduler,
+    onNone: () =>
+      Effect.succeed(
+        (_humidity: number, _reported: Option.Option<PlugState>) => Effect.void
+      ),
+    onSome: (plug) =>
+      plugScheduler(plug, (state) => switchPlug(plug.plugMac, state)),
   })
-  const meter = recordPassiveScan(config.mac).pipe(
-    Effect.tap(
-      Option.match({
-        onNone: () => Effect.void,
-        onSome: (reading) => updatePlug(reading.humidity),
-      })
+  const meter = (plugReading: Option.Option<PlugReading>) =>
+    recordPassiveScan(config.mac).pipe(
+      Effect.tap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: (reading) =>
+            updatePlug(
+              reading.humidity,
+              plugReading.pipe(Option.map((plug) => onOff(plug.is_on)))
+            ),
+        })
+      )
     )
-  )
   const plugWatch = yield* Ref.make<PlugWatch>({
     lastHeard: yield* Clock.currentTimeMillis,
     alerted: false,
@@ -141,11 +153,12 @@ export const collect: (
   const watchedPlugScan: (
     mac: string
   ) => Effect.Effect<
-    void,
+    Option.Option<PlugReading>,
     never,
     Bluetooth | Readings | ChildProcessSpawner.ChildProcessSpawner | Push
   > = Effect.fn("watchedPlugScan")(function* watchedPlugScan(mac: string) {
-    const heard = Option.isSome(yield* recordPlugScan(mac))
+    const reading = yield* recordPlugScan(mac)
+    const heard = Option.isSome(reading)
     const now = yield* Clock.currentTimeMillis
     const message = yield* Ref.modify(plugWatch, (watch) => {
       const [next, alertMessage] = watchPlug(watch, heard, now)
@@ -154,10 +167,11 @@ export const collect: (
     if (Option.isSome(message)) {
       yield* alert(message.value)
     }
+    return reading
   })
   const passive = Option.match(Option.fromUndefinedOr(config.plugMac), {
-    onNone: () => meter,
-    onSome: (plugMac) => watchedPlugScan(plugMac).pipe(Effect.andThen(meter)),
+    onNone: () => meter(Option.none()),
+    onSome: (plugMac) => watchedPlugScan(plugMac).pipe(Effect.flatMap(meter)),
   })
   return yield* Effect.all(
     [
