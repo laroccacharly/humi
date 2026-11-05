@@ -1,7 +1,8 @@
 import path from "node:path"
 
-import { Effect, Option, Schema } from "effect"
+import { Effect, Option, Schema, SchemaTransformation } from "effect"
 import * as JsonStore from "effect-lib/json-store"
+import type { Ports } from "effect-lib/tailscale"
 
 const configHome =
   process.env.XDG_CONFIG_HOME ?? path.join(process.env.HOME ?? "", ".config")
@@ -16,10 +17,16 @@ const minutes = Schema.Int.check(
 /** How long each active scan lasts when the config does not say. */
 export const defaultActiveScanSeconds = 30
 
-const address = Schema.String.check(
-  Schema.isPattern(/^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/u, {
-    expected: "a Bluetooth address like C0:FF:EE:12:34:56",
-  })
+// Saved in uppercase, the way BlueZ reports addresses, whatever case it was set in.
+const address = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.String.check(
+      Schema.isPattern(/^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/u, {
+        expected: "a Bluetooth address like C0:FF:EE:12:34:56",
+      })
+    ),
+    SchemaTransformation.toUpperCase()
+  )
 )
 
 const humidity = Schema.Int.check(
@@ -40,9 +47,13 @@ export class HumiConfig extends Schema.Class<HumiConfig>("HumiConfig")(
     /** Bluetooth address of the SwitchBot Plug Mini that `humi plug` switches. */
     plugMac: Schema.optionalKey(address),
     /** Minutes between passive scans, which read temperature and humidity. */
-    passiveScanMinutes: minutes,
-    /** Minutes between active scans, which read the battery. */
-    activeScanMinutes: minutes,
+    passiveScanMinutes: minutes.pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed(1))
+    ),
+    /** Minutes between active scans, which read the battery; daily by default. */
+    activeScanMinutes: minutes.pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed(1440))
+    ),
     /**
      * How long each active scan lasts; `defaultActiveScanSeconds` when absent.
      * Longer scans catch the battery more often but cost the meter more.
@@ -73,9 +84,8 @@ export class HumiConfig extends Schema.Class<HumiConfig>("HumiConfig")(
 export const activeScanSeconds = (config: HumiConfig): number =>
   config.activeScanSeconds ?? defaultActiveScanSeconds
 
-/** Every flag of the `humi config set` that creates the config. */
-export const configSetUsage =
-  "--mac <address> --passive-scan-minutes <minutes> --active-scan-minutes <minutes>"
+/** The `humi config set` that creates the config. */
+export const configSetUsage = "mac <address>"
 
 /** Raised when humi runs before `humi config set` created the config. */
 export class ConfigMissingError extends Schema.TaggedError<ConfigMissingError>()(
@@ -83,6 +93,7 @@ export class ConfigMissingError extends Schema.TaggedError<ConfigMissingError>()
   { message: Schema.String }
 ) {}
 
+/** The config file, with `humi config get | set | unset | list`. */
 export const configStore = JsonStore.make(configPath, HumiConfig)
 
 /** The saved config; there are no defaults, so a missing file fails. */
@@ -99,3 +110,9 @@ export const loadConfig = configStore.load.pipe(
     })
   )
 )
+
+/**
+ * The service's UI port, fixed so the URL survives restarts, and the HTTPS
+ * port Tailscale Serve publishes it on, apart from the other apps' 8443-8447.
+ */
+export const ports: Ports = { serverPort: 7878, tailscalePort: 8448 }

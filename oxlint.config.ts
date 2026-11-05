@@ -1,5 +1,4 @@
-import { defineConfig } from "oxlint"
-import tsLint from "ts-lint/config"
+import tsLint, { defineConfig } from "ts-lint/config"
 import antiSlop from "ultracite/oxlint/anti-slop"
 import core from "ultracite/oxlint/core"
 

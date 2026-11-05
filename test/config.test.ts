@@ -15,13 +15,25 @@ test("accepts an address and a frequency", () => {
 test("rejects a malformed address and intervals under a minute", () => {
   for (const input of [
     { mac: "C0:FF:EE:12:34", ...intervals },
-    { mac: "c0:ff:ee:12:34:56", ...intervals },
     { mac, ...intervals, passiveScanMinutes: 0 },
     { mac, ...intervals, activeScanMinutes: 1.5 },
-    { mac, passiveScanMinutes: 1 },
   ]) {
     expect(decode(input)._tag).toBe("Failure")
   }
+})
+
+test("addresses are saved in uppercase", () => {
+  expect(
+    Schema.decodeSync(HumiConfig)({ mac: "c0:ff:ee:12:34:56", ...intervals })
+      .mac
+  ).toBe(mac)
+})
+
+test("without intervals, passive scans run every minute and active ones daily", () => {
+  const config = Schema.decodeSync(HumiConfig)({ mac })
+  expect([config.passiveScanMinutes, config.activeScanMinutes]).toEqual([
+    1, 1440,
+  ])
 })
 
 test("active scans last 30 seconds unless the config says otherwise", () => {

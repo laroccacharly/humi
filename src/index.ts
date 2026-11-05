@@ -1,17 +1,10 @@
 #!/usr/bin/env bun
 import { BunRuntime, BunServices } from "@effect/platform-bun"
-import {
-  Console,
-  DateTime,
-  Effect,
-  Layer,
-  Option,
-  Record,
-  Schema,
-} from "effect"
+import { Console, DateTime, Effect, Layer, Option } from "effect"
 import * as Credentials from "effect-lib/credentials"
 import * as Push from "effect-lib/push"
 import { serviceCommand } from "effect-lib/systemd"
+import { tailscaleCommand } from "effect-lib/tailscale"
 import { Command, Flag } from "effect/cli"
 import { FetchHttpClient } from "effect/http"
 
@@ -19,12 +12,10 @@ import { Bluetooth } from "./bluetooth.ts"
 import { collect } from "./collector.ts"
 import {
   ConfigMissingError,
-  configPath,
   configSetUsage,
   configStore,
-  defaultActiveScanSeconds,
-  HumiConfig,
   loadConfig,
+  ports,
 } from "./config.ts"
 import { layer as databaseLayer } from "./db/database.ts"
 import { Readings } from "./db/readings.ts"
@@ -34,43 +25,6 @@ import { plugStatus, switchPlug } from "./plug.ts"
 import { serve } from "./server.ts"
 import { setupBluetooth } from "./setup-bluetooth.ts"
 import { onOff } from "./switchbot.ts"
-
-const macFlag = Flag.String("mac").pipe(
-  Flag.withDescription("Bluetooth address of the meter"),
-  Flag.optional
-)
-
-const plugMacFlag = Flag.String("plug-mac").pipe(
-  Flag.withDescription("Bluetooth address of the SwitchBot Plug Mini"),
-  Flag.optional
-)
-
-const plugOnHumidityFlag = Flag.Int("plug-on-humidity").pipe(
-  Flag.withDescription("Humidity (%) at or above which the plug turns on"),
-  Flag.optional
-)
-
-const plugOffHumidityFlag = Flag.Int("plug-off-humidity").pipe(
-  Flag.withDescription("Humidity (%) at or below which the plug turns off"),
-  Flag.optional
-)
-
-const passiveScanMinutesFlag = Flag.Int("passive-scan-minutes").pipe(
-  Flag.withDescription("Minutes between passive scans (temperature, humidity)"),
-  Flag.optional
-)
-
-const activeScanMinutesFlag = Flag.Int("active-scan-minutes").pipe(
-  Flag.withDescription("Minutes between active scans (battery)"),
-  Flag.optional
-)
-
-const activeScanSecondsFlag = Flag.Int("active-scan-seconds").pipe(
-  Flag.withDescription(
-    `How long each active scan lasts (default ${defaultActiveScanSeconds}s)`
-  ),
-  Flag.optional
-)
 
 const runCommand = Command.make(
   "run",
@@ -179,7 +133,7 @@ const bluetoothLsCommand = Command.make(
       yield* Console.log(`${device.mac}  ${rssi}  ${reading}  ${device.name}`)
     }
     return yield* Console.log(
-      `\nUse one with: humi config set ${configSetUsage}`
+      `\nUse one with: humi config set ${configSetUsage}, or plugMac <address> for a plug`
     )
   })
 ).pipe(Command.withDescription("Scan for nearby SwitchBot devices"))
@@ -187,91 +141,6 @@ const bluetoothLsCommand = Command.make(
 const bluetoothCommand = Command.make("bluetooth").pipe(
   Command.withDescription("Find Bluetooth devices"),
   Command.withSubcommands([bluetoothLsCommand])
-)
-
-/** An optional config field with its unit, or `fallback` when unset. */
-const optionalField = (
-  config: HumiConfig,
-  key: "plugMac" | "plugOnHumidity" | "plugOffHumidity" | "activeScanSeconds",
-  unit: string,
-  fallback = "(not set)"
-) =>
-  Option.match(Option.fromUndefinedOr(config[key]), {
-    onNone: () => fallback,
-    onSome: (set) => `${set}${unit}`,
-  })
-
-const showConfig = (config: HumiConfig) =>
-  Console.log(
-    [
-      configPath,
-      `mac           ${config.mac}`,
-      `plug mac      ${optionalField(config, "plugMac", "")}`,
-      `plug on at    ${optionalField(config, "plugOnHumidity", "%")}`,
-      `plug off at   ${optionalField(config, "plugOffHumidity", "%")}`,
-      `passive scan  every ${config.passiveScanMinutes} min`,
-      `active scan   every ${config.activeScanMinutes} min`,
-      `              for ${optionalField(config, "activeScanSeconds", "s", `${defaultActiveScanSeconds}s (default)`)}`,
-    ].join("\n")
-  )
-
-const upperCase = (text: string) => text.toUpperCase()
-
-const configSetCommand = Command.make(
-  "set",
-  {
-    mac: macFlag,
-    plugMac: plugMacFlag,
-    plugOnHumidity: plugOnHumidityFlag,
-    plugOffHumidity: plugOffHumidityFlag,
-    passiveScanMinutes: passiveScanMinutesFlag,
-    activeScanMinutes: activeScanMinutesFlag,
-    activeScanSeconds: activeScanSecondsFlag,
-  },
-  Effect.fn("configSetCommand")(function* configSetCommand(flags) {
-    const current = yield* configStore.load
-    // The first `set` creates the config, so it needs every required field.
-    const required = [
-      flags.mac,
-      flags.passiveScanMinutes,
-      flags.activeScanMinutes,
-    ] as const
-    if (Option.isNone(current) && Option.isNone(Option.all(required))) {
-      return yield* new ConfigMissingError({
-        message: `No config at ${configPath} yet; pass ${configSetUsage}`,
-      })
-    }
-    // Given flags override the saved config; optional fields left unset stay
-    // out of the file, so their defaults apply.
-    const saved = yield* Effect.transposeOption(
-      current.pipe(Option.map(Schema.encodeEffect(HumiConfig)))
-    )
-    const config = yield* Schema.decodeUnknownEffect(HumiConfig)({
-      ...Option.getOrElse(saved, () => ({})),
-      ...Record.getSomes<string, string | number>({
-        mac: flags.mac.pipe(Option.map(upperCase)),
-        plugMac: flags.plugMac.pipe(Option.map(upperCase)),
-        plugOnHumidity: flags.plugOnHumidity,
-        plugOffHumidity: flags.plugOffHumidity,
-        passiveScanMinutes: flags.passiveScanMinutes,
-        activeScanMinutes: flags.activeScanMinutes,
-        activeScanSeconds: flags.activeScanSeconds,
-      }),
-    })
-    yield* configStore.save(config)
-    return yield* showConfig(config)
-  })
-).pipe(
-  Command.withDescription(
-    "Create the config (needs --mac and both intervals), or change part of it"
-  )
-)
-
-const configCommand = Command.make("config", {}, () =>
-  loadConfig.pipe(Effect.flatMap(showConfig))
-).pipe(
-  Command.withDescription("Show the config"),
-  Command.withSubcommands([configSetCommand])
 )
 
 const plugMacOverride = Flag.String("mac").pipe(
@@ -294,7 +163,7 @@ const plugAddress: (
   if (plugMac === undefined) {
     return yield* new ConfigMissingError({
       message:
-        "No plug configured; pass --mac or run `humi config set --plug-mac <address>`",
+        "No plug configured; pass --mac or run `humi config set plugMac <address>`",
     })
   }
   return plugMac
@@ -338,9 +207,8 @@ const credentials = Credentials.make([Push.AppToken, Push.UserKey])
 const humiService = serviceCommand({
   name: "humi",
   description: "humi humidity and temperature logger",
-  // A fixed port so the UI keeps the same URL across restarts.
   script: import.meta.filename,
-  args: ["run", "--port", "7878"],
+  args: ["run", "--port", String(ports.serverPort)],
 })
 
 const humi = Command.make("humi").pipe(
@@ -348,11 +216,12 @@ const humi = Command.make("humi").pipe(
   Command.withSubcommands([
     runCommand,
     lsCommand,
-    configCommand,
+    configStore.commands(),
     bluetoothCommand,
     plugCommand,
     setupBluetoothCommand,
     humiService,
+    tailscaleCommand({ name: "humi", ports: Effect.succeed(ports) }),
     ...credentials.commands,
   ])
 )

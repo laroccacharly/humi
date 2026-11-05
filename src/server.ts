@@ -85,7 +85,7 @@ const recentReadings: Effect.Effect<
 })
 
 /**
- * Serves the UI on localhost at `port` (0 picks a free one) until the scope
+ * Serves the UI on 127.0.0.1 at `port` (0 picks a free one) until the scope
  * closes, so only this machine can see the readings. The
  * UI is built from source first, so each start serves the current code.
  */
@@ -98,7 +98,7 @@ export const serve: (
     const server = yield* Effect.acquireRelease(
       Effect.sync(() =>
         Bun.serve({
-          hostname: "localhost",
+          hostname: "127.0.0.1",
           port,
           development: false,
           routes: {

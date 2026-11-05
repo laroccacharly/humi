@@ -11,18 +11,17 @@
     "humi": "bun ./src/index.ts",
     "test": "bun test",
     "postinstall": "[ \"$(\"$HOME/.cache/lightpanda-node/lightpanda\" version 2>/dev/null)\" = 1.0.0 ] || lightpanda install 1.0.0",
-    "lint": "bun --bun oxlint . && ts-lint-effect",
-    "lint:fix": "bun --bun oxlint . --fix",
-    "format": "oxfmt .",
-    "typecheck": "tsc --noEmit"
+    "lint": "ts-lint",
+    "lint:fix": "ts-lint --fix",
+    "format": "oxfmt ."
   },
   "dependencies": {
-    "@effect/platform-browser": "4.0.0",
-    "@effect/platform-bun": "4.0.0",
-    "@effect/sql-sqlite-bun": "4.0.0",
+    "@effect/platform-browser": "4.1.2",
+    "@effect/platform-bun": "4.1.2",
+    "@effect/sql-sqlite-bun": "4.1.2",
     "echarts": "^6.1.0",
-    "effect": "4.0.0",
-    "effect-lib": "github:laroccacharly/effect-lib#v0.9.0",
+    "effect": "4.1.2",
+    "effect-lib": "github:laroccacharly/effect-lib#v0.34.0",
     "foldkit": "0.168.0",
     "vite": "^8.3.4"
   },
@@ -31,15 +30,13 @@
     "@lightpanda/browser": "^1.6.0",
     "@types/bun": "^1.4.2",
     "oxfmt": "^0.65.0",
-    "oxlint": "1.83.0",
-    "oxlint-tsgolint": "7",
     "playwright-core": "^1.63.0",
-    "ts-lint": "github:laroccacharly/ts-lint#v0.5.0",
+    "ts-lint": "github:laroccacharly/ts-lint#v0.9.0",
     "typescript": "^7.0.2",
     "ultracite": "^7.11.1"
   },
   "overrides": {
-    "@effect/platform-node-shared": "4.0.0",
-    "@oxlint/plugins": "$oxlint"
+    "@effect/platform-node-shared": "4.1.2",
+    "@oxlint/plugins": "1.91.0"
   }
 }

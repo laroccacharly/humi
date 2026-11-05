@@ -1,5 +1,5 @@
 import recommended from "@foldkit/oxlint-plugin/recommended.json" with { type: "json" }
-import { defineConfig } from "oxlint"
+import { defineConfig } from "ts-lint/config"
 
 const rules = Object.fromEntries(
   Object.entries(recommended.rules).map(
